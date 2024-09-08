@@ -181,8 +181,9 @@ const (
 )
 
 type SearchResult struct {
-	Name string
-	ID   string
+	Score   float64
+	DestDir string
+	Diff    []string
 }
 
 type Job struct {
@@ -193,7 +194,7 @@ type Job struct {
 	Time                 time.Time
 	UseMBID              string
 	SourcePath, DestPath string
-	SearchResult         *SearchResult
+	SearchResult         sqlb.JSON[*SearchResult]
 }
 
 func (Job) PrimaryKey() string {
@@ -250,6 +251,11 @@ func TestInsertJob(t *testing.T) {
 		Operation:  OperationMove,
 		Time:       time.Now(),
 		SourcePath: "/some/path",
+		SearchResult: sqlb.JSON[*SearchResult]{&SearchResult{
+			Score:   100,
+			DestDir: "some dir",
+			Diff:    []string{"one", "two"},
+		}},
 	}
 
 	err = sqlb.ScanRow(ctx, db, &job, "insert into jobs ? returning *", sqlb.InsertSQL(job))

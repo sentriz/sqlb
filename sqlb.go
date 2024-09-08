@@ -3,6 +3,9 @@ package sqlb
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"reflect"
@@ -222,6 +225,26 @@ func (l LoggingDB) ExecContext(ctx context.Context, query string, args ...any) (
 	r, err := l.DB.ExecContext(ctx, query, args...)
 	l.logger.Log(ctx, l.level, "db exec", "took", time.Since(start), "query", query)
 	return r, err
+}
+
+type JSON[T any] struct {
+	Data T
+}
+
+func NewJSON[T any](t T) JSON[T] {
+	return JSON[T]{Data: t}
+}
+
+func (j *JSON[T]) Scan(value any) error {
+	b, ok := value.([]byte)
+	if !ok {
+		return errors.New("type assertion to []byte failed")
+	}
+	return json.Unmarshal(b, &j.Data)
+}
+
+func (j JSON[T]) Value() (driver.Value, error) {
+	return json.Marshal(j.Data)
 }
 
 // initT can initialise and return a pointer to Type even if T is *Type
