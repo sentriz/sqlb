@@ -9,26 +9,36 @@ import (
 )
 
 type Query struct {
-	query string
+	query *strings.Builder
 	args  []any
 }
 
 func NewQuery(query string, args ...any) Query {
-	return Query{query: query, args: args}
+	var q Query
+	q.Append(query, args...)
+	return q
 }
 
 func SubQuery(query string, args ...any) Query {
-	return Query{query: "(" + query + ")", args: args}
+	var q Query
+	q.Append("("+query+")", args...)
+	return q
 }
 
 func (q *Query) Append(query string, args ...any) {
-	mustValidatePlaceholders(query, args)
-
-	if q.query != "" && q.query[len(q.query)-1] != ' ' {
-		q.query += " "
+	if want, got := strings.Count(query, "?"), len(args); want != got {
+		panic(fmt.Sprintf("want %d args, got %d", want, got))
 	}
 
-	q.query += query
+	if q.query == nil {
+		q.query = &strings.Builder{}
+	}
+
+	if q.query.Len() > 0 && q.query.String()[q.query.Len()-1] != ' ' {
+		q.query.WriteRune(' ')
+	}
+
+	q.query.WriteString(query)
 	q.args = append(q.args, args...)
 }
 
@@ -42,41 +52,33 @@ func (q Query) SQL() (string, []any) {
 		}
 	}
 	if !hasSQLer {
-		return q.query, q.args
+		return q.query.String(), q.args
 	}
 
-	mustValidatePlaceholders(q.query, q.args)
-
-	var query string
+	var query strings.Builder
 	var args []any
 
 	var count int
-	for _, c := range q.query {
+	for _, c := range q.query.String() {
 		if c != '?' {
-			query += string(c)
+			query.WriteRune(c)
 			continue
 		}
 
 		switch arg := q.args[count].(type) {
 		case SQLer:
 			q, ar := arg.SQL()
-			query += q
+			query.WriteString(q)
 			args = append(args, ar...)
 		default:
-			query += string(c)
+			query.WriteRune(c)
 			args = append(args, arg)
 		}
 
 		count++
 	}
 
-	return query, args
-}
-
-func mustValidatePlaceholders(query string, args []any) {
-	if want, got := strings.Count(query, "?"), len(args); want != got {
-		panic(fmt.Sprintf("want %d args, got %d", want, got))
-	}
+	return query.String(), args
 }
 
 type Updatable interface {
@@ -85,16 +87,18 @@ type Updatable interface {
 }
 
 func UpdateSQL(u Updatable) Query {
+	var set bool
 	var b Query
 	for _, v := range u.Values() {
 		if v.Name == u.PrimaryKey() {
 			continue
 		}
 		var p string
-		if b.query != "" {
+		if set {
 			p = ", "
 		}
 		b.Append(p+v.Name+"=?", v.Value)
+		set = true
 	}
 	return b
 }
