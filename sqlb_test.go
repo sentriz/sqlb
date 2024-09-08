@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"go.senan.xyz/sqlb"
 
@@ -146,6 +147,108 @@ func TestScan(t *testing.T) {
 	err = sqlb.ScanRow(ctx, db, &two, "select * from tasks where id=?", 2)
 	be.NilErr(t, err)
 	be.DeepEqual(t, Task{ID: 2, Name: "two"}, two)
+}
+
+type JobStatus string
+
+const (
+	StatusEnqueued   JobStatus = ""
+	StatusInProgress JobStatus = "in-progress"
+	StatusNeedsInput JobStatus = "needs-input"
+	StatusError      JobStatus = "error"
+	StatusComplete   JobStatus = "complete"
+)
+
+type Operation string
+
+const (
+	OperationCopy Operation = "copy"
+	OperationMove Operation = "move"
+)
+
+type SearchResult struct {
+	Name string
+	ID   string
+}
+
+type Job struct {
+	ID                   uint64
+	Status               JobStatus
+	Error                string
+	Operation            Operation
+	Time                 time.Time
+	UseMBID              string
+	SourcePath, DestPath string
+	SearchResult         *SearchResult
+}
+
+func (Job) PrimaryKey() string {
+	return "id"
+}
+func (j Job) Values() []sql.NamedArg {
+	return []sql.NamedArg{
+		sql.Named("id", j.ID),
+		sql.Named("status", j.Status),
+		sql.Named("error", j.Error),
+		sql.Named("operation", j.Operation),
+		sql.Named("time", j.Time),
+		sql.Named("use_mbid", j.UseMBID),
+		sql.Named("source_path", j.SourcePath),
+		sql.Named("dest_path", j.DestPath),
+		sql.Named("search_result", j.SearchResult),
+	}
+}
+func (j *Job) ScanFrom(rows *sql.Rows) error {
+	return rows.Scan(&j.ID, &j.Status, &j.Error, &j.Operation, &j.Time, &j.UseMBID, &j.SourcePath, &j.DestPath, &j.SearchResult)
+}
+
+func jobsMigrate(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `
+		create table if not exists jobs (
+			id            integer primary key autoincrement,
+			status        text not null default "",
+			error         text not null default "",
+			operation     text not null,
+			time          timestamp not null,
+			use_mbid      text not null default "",
+			source_path   text not null,
+			dest_path     text not null default "",
+			search_result jsonb
+		);
+
+		create index if not exists idx_jobs_status on jobs (status);
+		create index if not exists idx_jobs_source_path on jobs (source_path);
+	`)
+	return err
+}
+
+func TestInsertJob(t *testing.T) {
+	db := newDB(t)
+	ctx := context.Background()
+
+	err := jobsMigrate(ctx, db)
+	be.NilErr(t, err)
+
+	job := Job{
+		Status:     StatusInProgress,
+		Operation:  OperationMove,
+		Time:       time.Now(),
+		SourcePath: "/some/path",
+	}
+
+	err = sqlb.ScanRow(ctx, db, &job, "insert into jobs ? returning *", sqlb.InsertSQL(job))
+	be.NilErr(t, err)
+	be.Nonzero(t, job.ID)
+
+	job.Status = StatusComplete
+	err = sqlb.ScanRow(ctx, db, &job, "update jobs set ? returning *", sqlb.UpdateSQL(job))
+	be.NilErr(t, err)
+
+	var readJob Job
+	err = sqlb.ScanRow(ctx, db, &readJob, "select * from jobs where id = ?", job.ID)
+	be.NilErr(t, err)
+
+	be.DeepEqual(t, job, readJob)
 }
 
 func newDB(t *testing.T) *sql.DB {
