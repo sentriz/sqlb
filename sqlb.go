@@ -134,11 +134,11 @@ type Scannable interface {
 	ScanFrom(rows *sql.Rows) error
 }
 
-type DB interface {
+type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func Scan[T Scannable](ctx context.Context, db DB, dest *[]T, query string, args ...any) error {
+func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -158,7 +158,7 @@ func Scan[T Scannable](ctx context.Context, db DB, dest *[]T, query string, args
 	return nil
 }
 
-func ScanRow[T Scannable](ctx context.Context, db DB, dest T, query string, args ...any) error {
+func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -173,6 +173,16 @@ func ScanRow[T Scannable](ctx context.Context, db DB, dest T, query string, args
 		return err
 	}
 	return nil
+}
+
+type ExecDB interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+	_, err := db.ExecContext(ctx, query, args...)
+	return err
 }
 
 type SQLer interface {

@@ -14,6 +14,8 @@ import (
 )
 
 func TestBuild(t *testing.T) {
+	t.Parallel()
+
 	var b sqlb.Query
 	b.Append("select * from jobs")
 	b.Append("where 1")
@@ -27,6 +29,8 @@ func TestBuild(t *testing.T) {
 }
 
 func TestBuildSubquery(t *testing.T) {
+	t.Parallel()
+
 	var whereA sqlb.Query
 	whereA.Append("three=?", 3)
 
@@ -55,6 +59,8 @@ func TestBuildSubquery(t *testing.T) {
 }
 
 func TestBuildPanic(t *testing.T) {
+	t.Parallel()
+
 	expPanic := "want 3 args, got 2"
 
 	defer func() {
@@ -68,6 +74,8 @@ func TestBuildPanic(t *testing.T) {
 }
 
 func TestUpdate(t *testing.T) {
+	t.Parallel()
+
 	db := newDB(t)
 	ctx := context.Background()
 
@@ -91,6 +99,8 @@ func TestUpdate(t *testing.T) {
 }
 
 func TestInsertBuild(t *testing.T) {
+	t.Parallel()
+
 	task := Task{Name: "the name", Age: 32}
 
 	build := sqlb.NewQuery("insert into tasks ?", sqlb.InsertSQL(task))
@@ -102,6 +112,8 @@ func TestInsertBuild(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
+	t.Parallel()
+
 	db := newDB(t)
 	ctx := context.Background()
 
@@ -132,6 +144,8 @@ func (t *Task) ScanFrom(rows *sql.Rows) error {
 }
 
 func TestScan(t *testing.T) {
+	t.Parallel()
+
 	db := newDB(t)
 	ctx := context.Background()
 
@@ -223,6 +237,8 @@ func jobsMigrate(ctx context.Context, db *sql.DB) error {
 }
 
 func TestInsertJob(t *testing.T) {
+	t.Parallel()
+
 	db := newDB(t)
 	ctx := context.Background()
 
@@ -249,6 +265,18 @@ func TestInsertJob(t *testing.T) {
 	be.NilErr(t, err)
 
 	be.DeepEqual(t, job, readJob)
+}
+
+func TestExec(t *testing.T) {
+	t.Parallel()
+
+	db := newDB(t)
+	ctx := context.Background()
+
+	task := Task{Name: "eg"}
+
+	err := sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(task))
+	be.NilErr(t, err)
 }
 
 func newDB(t *testing.T) *sql.DB {
