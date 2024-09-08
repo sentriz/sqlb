@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
+	"time"
 )
 
 type Query struct {
@@ -197,6 +199,29 @@ func (p Primatives) ScanFrom(rows *sql.Rows) error {
 
 func Primative(dests ...any) Scannable {
 	return Primatives(dests)
+}
+
+type LoggingDB struct {
+	*sql.DB
+	logger *slog.Logger
+	level  slog.Level
+}
+
+func NewLogDB(db *sql.DB, log *slog.Logger, level slog.Level) LoggingDB {
+	return LoggingDB{db, log, level}
+}
+
+func (l LoggingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	start := time.Now()
+	rows, err := l.DB.QueryContext(ctx, query, args...)
+	l.logger.Log(ctx, l.level, "db query", "took", time.Since(start), "query", query)
+	return rows, err
+}
+func (l LoggingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	start := time.Now()
+	r, err := l.DB.ExecContext(ctx, query, args...)
+	l.logger.Log(ctx, l.level, "db exec", "took", time.Since(start), "query", query)
+	return r, err
 }
 
 // initT can initialise and return a pointer to Type even if T is *Type
