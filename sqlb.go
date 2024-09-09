@@ -7,9 +7,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -146,6 +146,10 @@ type ScanDB interface {
 func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
+	if logFunc != nil {
+		defer logFunc(ctx, "query", query)()
+	}
+
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("query: %w", err)
@@ -166,11 +170,16 @@ func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, 
 func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
+	if logFunc != nil {
+		defer logFunc(ctx, "query row", query)()
+	}
+
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+
 	if !rows.Next() {
 		return sql.ErrNoRows
 	}
@@ -186,6 +195,11 @@ type ExecDB interface {
 
 func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
+
+	if logFunc != nil {
+		defer logFunc(ctx, "exec", query)()
+	}
+
 	_, err := db.ExecContext(ctx, query, args...)
 	return err
 }
@@ -202,48 +216,6 @@ func (p Primatives) ScanFrom(rows *sql.Rows) error {
 
 func Primative(dests ...any) Scannable {
 	return Primatives(dests)
-}
-
-type LoggingDB struct {
-	*sql.DB
-	logger *slog.Logger
-	level  slog.Level
-}
-
-func NewLoggingDB(db *sql.DB, log *slog.Logger, level slog.Level) LoggingDB {
-	return LoggingDB{db, log, level}
-}
-
-func (l LoggingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	defer l.log(ctx, "db exec", query)()
-	return l.DB.ExecContext(ctx, query, args...)
-}
-func (l LoggingDB) Exec(query string, args ...any) (sql.Result, error) {
-	defer l.log(context.Background(), "db exec", query)()
-	return l.DB.Exec(query, args...)
-}
-func (l LoggingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	defer l.log(ctx, "db query", query)()
-	return l.DB.QueryContext(ctx, query, args...)
-}
-func (l LoggingDB) Query(query string, args ...any) (*sql.Rows, error) {
-	defer l.log(context.Background(), "db query", query)()
-	return l.DB.Query(query, args...)
-}
-func (l LoggingDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
-	defer l.log(ctx, "db query row", query)()
-	return l.DB.QueryRowContext(ctx, query, args...)
-}
-func (l LoggingDB) QueryRow(query string, args ...any) *sql.Row {
-	defer l.log(context.Background(), "db query row", query)()
-	return l.DB.QueryRow(query, args...)
-}
-
-func (l LoggingDB) log(ctx context.Context, msg string, query string) func() {
-	start := time.Now()
-	return func() {
-		l.logger.Log(ctx, l.level, msg, "took", time.Since(start), "query", query)
-	}
 }
 
 type JSON[T any] struct {
@@ -270,6 +242,23 @@ func (j *JSON[T]) Scan(value any) error {
 
 func (j JSON[T]) Value() (driver.Value, error) {
 	return json.Marshal(j.Data)
+}
+
+var logFuncMu sync.Mutex
+var logFunc func(ctx context.Context, typ string, query string) func()
+
+type LogFunc func(ctx context.Context, typ string, duration time.Duration, query string)
+
+func SetLog(f LogFunc) {
+	logFuncMu.Lock()
+	defer logFuncMu.Unlock()
+
+	logFunc = func(ctx context.Context, typ string, query string) func() {
+		start := time.Now()
+		return func() {
+			f(ctx, typ, time.Since(start), query)
+		}
+	}
 }
 
 // initT can initialise and return a pointer to Type even if T is *Type
