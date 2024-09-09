@@ -210,26 +210,48 @@ type LoggingDB struct {
 	level  slog.Level
 }
 
-func NewLogDB(db *sql.DB, log *slog.Logger, level slog.Level) LoggingDB {
+func NewLoggingDB(db *sql.DB, log *slog.Logger, level slog.Level) LoggingDB {
 	return LoggingDB{db, log, level}
 }
 
-func (l LoggingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	start := time.Now()
-	rows, err := l.DB.QueryContext(ctx, query, args...)
-	l.logger.Log(ctx, l.level, "db query", "took", time.Since(start), "query", query)
-	return rows, err
-}
 func (l LoggingDB) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	defer l.log(ctx, "db exec", query)()
+	return l.DB.ExecContext(ctx, query, args...)
+}
+func (l LoggingDB) Exec(query string, args ...any) (sql.Result, error) {
+	defer l.log(context.Background(), "db exec", query)()
+	return l.DB.Exec(query, args...)
+}
+func (l LoggingDB) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	defer l.log(ctx, "db query", query)()
+	return l.DB.QueryContext(ctx, query, args...)
+}
+func (l LoggingDB) Query(query string, args ...any) (*sql.Rows, error) {
+	defer l.log(context.Background(), "db query", query)()
+	return l.DB.Query(query, args...)
+}
+func (l LoggingDB) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	defer l.log(ctx, "db query row", query)()
+	return l.DB.QueryRowContext(ctx, query, args...)
+}
+func (l LoggingDB) QueryRow(query string, args ...any) *sql.Row {
+	defer l.log(context.Background(), "db query row", query)()
+	return l.DB.QueryRow(query, args...)
+}
+
+func (l LoggingDB) log(ctx context.Context, msg string, query string) func() {
 	start := time.Now()
-	r, err := l.DB.ExecContext(ctx, query, args...)
-	l.logger.Log(ctx, l.level, "db exec", "took", time.Since(start), "query", query)
-	return r, err
+	return func() {
+		l.logger.Log(ctx, l.level, msg, "took", time.Since(start), "query", query)
+	}
 }
 
 type JSON[T any] struct {
 	Data T
 }
+
+var _ sql.Scanner = &JSON[struct{}]{}
+var _ driver.Valuer = JSON[struct{}]{}
 
 func NewJSON[T any](t T) JSON[T] {
 	return JSON[T]{Data: t}
