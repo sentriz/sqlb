@@ -269,7 +269,7 @@ func TestInsertJob(t *testing.T) {
 	var readJob Job
 	err = sqlb.ScanRow(ctx, db, &readJob, "select * from jobs where id = ?", job.ID)
 	be.NilErr(t, err)
-
+	be.Equal(t, 100, readJob.SearchResult.Data.Score)
 	be.DeepEqual(t, job, readJob)
 }
 

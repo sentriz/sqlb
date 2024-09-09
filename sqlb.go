@@ -236,6 +236,9 @@ func NewJSON[T any](t T) JSON[T] {
 }
 
 func (j *JSON[T]) Scan(value any) error {
+	if value == nil {
+		return nil
+	}
 	b, ok := value.([]byte)
 	if !ok {
 		return errors.New("type assertion to []byte failed")
