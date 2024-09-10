@@ -24,12 +24,6 @@ func NewQuery(query string, args ...any) Query {
 	return q
 }
 
-func SubQuery(query string, args ...any) Query {
-	var q Query
-	q.Append("("+query+")", args...)
-	return q
-}
-
 func (q *Query) Append(query string, args ...any) {
 	if want, got := strings.Count(query, "?"), len(args); want != got {
 		panic(fmt.Sprintf("want %d args, got %d", want, got))

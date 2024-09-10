@@ -42,11 +42,11 @@ func TestBuildSubquery(t *testing.T) {
 	where := sqlb.NewQuery("?", whereC)
 
 	var b sqlb.Query
-	b.Append("select * from ? union ?",
-		sqlb.SubQuery("select * from jobs where a=?",
+	b.Append("select * from (?) union (?)",
+		sqlb.NewQuery("select * from jobs where a=?",
 			"a",
 		),
-		sqlb.SubQuery("select * from jobs where a=? and ?",
+		sqlb.NewQuery("select * from jobs where a=? and ?",
 			"aa",
 			sqlb.NewQuery("xx=?", 10),
 		),
