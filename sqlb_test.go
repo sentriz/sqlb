@@ -108,7 +108,22 @@ func TestInsertBuild(t *testing.T) {
 
 	be.Equal(t, "insert into tasks (name, age) VALUES (?, ?)", query)
 	be.DeepEqual(t, []any{"the name", 32}, args)
+}
 
+func TestInsertBuildMany(t *testing.T) {
+	t.Parallel()
+
+	tasks := []Task{
+		{Name: "a"},
+		{Name: "b", Age: 1},
+		{Name: "c", Age: 2},
+	}
+
+	build := sqlb.NewQuery("insert into tasks ?", sqlb.InsertSQL(tasks...))
+	query, args := build.SQL()
+
+	be.Equal(t, "insert into tasks (name, age) VALUES (?, ?), (?, ?), (?, ?)", query)
+	be.DeepEqual(t, []any{"a", 0, "b", 1, "c", 2}, args)
 }
 
 func TestInsert(t *testing.T) {

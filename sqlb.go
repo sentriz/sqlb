@@ -85,11 +85,11 @@ type Updatable interface {
 	Values() []sql.NamedArg
 }
 
-func UpdateSQL(u Updatable) Query {
+func UpdateSQL(item Updatable) Query {
 	var set bool
 	var b Query
-	for _, v := range u.Values() {
-		if v.Name == u.PrimaryKey() {
+	for _, v := range item.Values() {
+		if v.Name == item.PrimaryKey() {
 			continue
 		}
 		var p string
@@ -107,24 +107,38 @@ type Insertable interface {
 	Values() []sql.NamedArg
 }
 
-func InsertSQL(i Insertable) Query {
-	insValues := i.Values()
+func InsertSQL[T Insertable](items ...T) Query {
+	if len(items) == 0 {
+		panic("InsertSQL called with zero arguments")
+	}
 
-	columns := make([]string, 0, len(insValues))
-	placeholders := make([]string, 0, len(insValues))
-	values := make([]any, 0, len(insValues))
+	first := items[0]
+	firstValues := first.Values()
 
-	for _, v := range insValues {
-		if v.Name == i.PrimaryKey() {
+	columns := make([]string, 0, len(firstValues))
+	for _, v := range firstValues {
+		if v.Name == first.PrimaryKey() {
 			continue
 		}
 		columns = append(columns, v.Name)
-		placeholders = append(placeholders, "?")
-		values = append(values, v.Value)
+	}
+
+	rows := make([]string, 0, len(items))
+	values := make([]any, 0, len(columns)*len(items))
+	for _, item := range items {
+		placeholders := make([]string, 0, len(columns))
+		for _, v := range item.Values() {
+			if v.Name == item.PrimaryKey() {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			values = append(values, v.Value)
+		}
+		rows = append(rows, fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")))
 	}
 
 	return NewQuery(
-		fmt.Sprintf("(%s) VALUES (%s)", strings.Join(columns, ", "), strings.Join(placeholders, ", ")),
+		fmt.Sprintf("(%s) VALUES %s", strings.Join(columns, ", "), strings.Join(rows, ", ")),
 		values...,
 	)
 }
