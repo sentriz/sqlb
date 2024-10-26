@@ -155,7 +155,7 @@ func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, 
 	query, args = NewQuery(query, args...).SQL()
 
 	if logFunc != nil {
-		defer logFunc(ctx, "query", query)()
+		defer logFunc()(ctx, "query", query)
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -179,7 +179,7 @@ func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, 
 	query, args = NewQuery(query, args...).SQL()
 
 	if logFunc != nil {
-		defer logFunc(ctx, "query row", query)()
+		defer logFunc()(ctx, "query row", query)
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -205,7 +205,7 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	if logFunc != nil {
-		defer logFunc(ctx, "exec", query)()
+		defer logFunc()(ctx, "exec", query)
 	}
 
 	_, err := db.ExecContext(ctx, query, args...)
@@ -253,7 +253,7 @@ func (j JSON[T]) Value() (driver.Value, error) {
 }
 
 var logFuncMu sync.Mutex
-var logFunc func(ctx context.Context, typ string, query string) func()
+var logFunc func() func(ctx context.Context, typ string, query string)
 
 type LogFunc func(ctx context.Context, typ string, duration time.Duration, query string)
 
@@ -261,9 +261,9 @@ func SetLog(f LogFunc) {
 	logFuncMu.Lock()
 	defer logFuncMu.Unlock()
 
-	logFunc = func(ctx context.Context, typ string, query string) func() {
+	logFunc = func() func(context.Context, string, string) {
 		start := time.Now()
-		return func() {
+		return func(ctx context.Context, typ string, query string) {
 			f(ctx, typ, time.Since(start), query)
 		}
 	}
