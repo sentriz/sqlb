@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"strings"
 	"sync"
@@ -195,6 +196,39 @@ func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, 
 		return err
 	}
 	return nil
+}
+
+func Iter[T Scannable](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
+	return func(yield func(T, error) bool) {
+		query, args = NewQuery(query, args...).SQL()
+
+		if logFunc != nil {
+			defer logFunc()(ctx, "iter", query)
+		}
+
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			var zero T
+			yield(zero, err)
+			return
+		}
+		defer rows.Close()
+
+		newT := initT[T]()
+		for rows.Next() {
+			t := newT()
+			if err := t.ScanFrom(rows); err != nil {
+				var zero T
+				if !yield(zero, err) {
+					break
+				}
+				continue
+			}
+			if !yield(t, nil) {
+				break
+			}
+		}
+	}
 }
 
 type ExecDB interface {
