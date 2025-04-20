@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -152,7 +151,10 @@ type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
+func Scan[T any, pT interface {
+	Scannable
+	*T
+}](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	if logFunc != nil {
@@ -165,10 +167,9 @@ func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, 
 	}
 	defer rows.Close()
 
-	newT := initT[T]()
 	for rows.Next() {
-		t := newT()
-		if err := t.ScanFrom(rows); err != nil {
+		var t T
+		if err := pT(&t).ScanFrom(rows); err != nil {
 			return err
 		}
 		*dest = append(*dest, t)
@@ -176,7 +177,33 @@ func Scan[T Scannable](ctx context.Context, db ScanDB, dest *[]T, query string, 
 	return nil
 }
 
-func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, args ...any) error {
+func ScanPtr[T any, pT interface {
+	Scannable
+	*T
+}](ctx context.Context, db ScanDB, dest *[]*T, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+
+	if logFunc != nil {
+		defer logFunc()(ctx, "query", query)
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("query: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var t T
+		if err := pT(&t).ScanFrom(rows); err != nil {
+			return err
+		}
+		*dest = append(*dest, &t)
+	}
+	return nil
+}
+
+func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	if logFunc != nil {
@@ -198,7 +225,10 @@ func ScanRow[T Scannable](ctx context.Context, db ScanDB, dest T, query string, 
 	return nil
 }
 
-func Iter[T Scannable](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
+func Iter[T any, pT interface {
+	Scannable
+	*T
+}](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
@@ -214,10 +244,9 @@ func Iter[T Scannable](ctx context.Context, db ScanDB, query string, args ...any
 		}
 		defer rows.Close()
 
-		newT := initT[T]()
 		for rows.Next() {
-			t := newT()
-			if err := t.ScanFrom(rows); err != nil {
+			var t T
+			if err := pT(&t).ScanFrom(rows); err != nil {
 				var zero T
 				if !yield(zero, err) {
 					break
@@ -300,20 +329,5 @@ func SetLog(f LogFunc) {
 		return func(ctx context.Context, typ string, query string) {
 			f(ctx, typ, time.Since(start), query)
 		}
-	}
-}
-
-// initT can initialise and return a pointer to Type even if T is *Type
-func initT[T any]() func() T {
-	rT := reflect.TypeFor[T]()
-	if rT.Kind() != reflect.Pointer {
-		return func() T {
-			var t T
-			return t
-		}
-	}
-	rT = rT.Elem()
-	return func() T {
-		return reflect.New(rT).Interface().(T)
 	}
 }

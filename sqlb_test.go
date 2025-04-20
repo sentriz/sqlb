@@ -3,6 +3,7 @@ package sqlb_test
 import (
 	"context"
 	"database/sql"
+	"iter"
 	"testing"
 	"time"
 
@@ -77,7 +78,7 @@ func TestUpdate(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var task Task
 	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks (name) values (?) returning *", "the name")
@@ -130,12 +131,54 @@ func TestInsert(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	task := Task{Name: "the name", Age: 32}
 	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
 	be.NilErr(t, err)
 	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 32}, task)
+}
+
+func TestIter(t *testing.T) {
+	t.Parallel()
+
+	db := newDB(t)
+	ctx := t.Context()
+
+	tasks := []Task{
+		{Name: "a", Age: 1},
+		{Name: "b", Age: 2},
+		{Name: "c", Age: 3},
+	}
+
+	err := sqlb.Exec(ctx, db, "delete from tasks")
+	be.NilErr(t, err)
+
+	err = sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(tasks...))
+	be.NilErr(t, err)
+
+	next, stop := iter.Pull2(sqlb.Iter[Task](ctx, db, "select * from tasks order by age"))
+	defer stop()
+
+	task, err, ok := next()
+	be.True(t, ok)
+	be.NilErr(t, err)
+	be.Equal(t, "a", task.Name)
+
+	task, err, ok = next()
+	be.True(t, ok)
+	be.NilErr(t, err)
+	be.Equal(t, "b", task.Name)
+
+	task, err, ok = next()
+	be.True(t, ok)
+	be.NilErr(t, err)
+	be.Equal(t, "c", task.Name)
+
+	task, err, ok = next()
+	be.False(t, ok)
+	be.NilErr(t, err)
+	be.Equal(t, Task{}, task)
 }
 
 type Task struct {
@@ -162,10 +205,10 @@ func TestScan(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	var out []*Task
-	err := sqlb.Scan(ctx, db, &out, "select * from tasks order by id")
+	err := sqlb.ScanPtr(ctx, db, &out, "select * from tasks order by id")
 	be.NilErr(t, err)
 	be.DeepEqual(t, []*Task{
 		{ID: 1, Name: "one"},
@@ -256,7 +299,7 @@ func TestInsertJob(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	err := jobsMigrate(ctx, db)
 	be.NilErr(t, err)
@@ -292,7 +335,7 @@ func TestExec(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
-	ctx := context.Background()
+	ctx := t.Context()
 
 	task := Task{Name: "eg"}
 
@@ -307,7 +350,7 @@ func newDB(t *testing.T) *sql.DB {
 		db.Close()
 	})
 
-	ctx := context.Background()
+	ctx := t.Context()
 	_, err = db.ExecContext(ctx, `create table tasks (id integer primary key autoincrement, name text not null default "", age integer not null default 0)`)
 	be.NilErr(t, err)
 	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")

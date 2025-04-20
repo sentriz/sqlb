@@ -6,7 +6,7 @@
 
 - No-assumptions query builder suitable for dynamic SQL and arbitrary subqueries
 - Type-safe and SQL injection-safe query composition
-- Scanning results to interfaces instead of using reflection and struct tags
+- Scanning results to interfaces, no use of reflection or struct tags
 
 ## Installation
 
