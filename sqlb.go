@@ -157,8 +157,8 @@ func Scan[T any, pT interface {
 }](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
-	if logFunc != nil {
-		defer logFunc()(ctx, "query", query)
+	if f := logFunc; f != nil {
+		defer f(ctx, "query", query)()
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -183,8 +183,8 @@ func ScanPtr[T any, pT interface {
 }](ctx context.Context, db ScanDB, dest *[]*T, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
-	if logFunc != nil {
-		defer logFunc()(ctx, "query", query)
+	if f := logFunc; f != nil {
+		defer f(ctx, "query", query)()
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -206,8 +206,8 @@ func ScanPtr[T any, pT interface {
 func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
-	if logFunc != nil {
-		defer logFunc()(ctx, "query row", query)
+	if f := logFunc; f != nil {
+		defer f(ctx, "query row", query)()
 	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
@@ -232,8 +232,8 @@ func Iter[T any, pT interface {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
-		if logFunc != nil {
-			defer logFunc()(ctx, "iter", query)
+		if f := logFunc; f != nil {
+			defer f(ctx, "iter", query)()
 		}
 
 		rows, err := db.QueryContext(ctx, query, args...)
@@ -267,8 +267,8 @@ type ExecDB interface {
 func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
-	if logFunc != nil {
-		defer logFunc()(ctx, "exec", query)
+	if f := logFunc; f != nil {
+		defer f(ctx, "exec", query)()
 	}
 
 	_, err := db.ExecContext(ctx, query, args...)
@@ -279,14 +279,14 @@ type SQLer interface {
 	SQL() (string, []any)
 }
 
-type Primatives []any
+type primatives []any
 
-func (p Primatives) ScanFrom(rows *sql.Rows) error {
+func (p primatives) ScanFrom(rows *sql.Rows) error {
 	return rows.Scan(p...)
 }
 
-func Primative(dests ...any) Scannable {
-	return Primatives(dests)
+func Values(dests ...any) Scannable {
+	return primatives(dests)
 }
 
 type JSON[T any] struct {
@@ -315,8 +315,10 @@ func (j JSON[T]) Value() (driver.Value, error) {
 	return json.Marshal(j.Data)
 }
 
-var logFuncMu sync.Mutex
-var logFunc func() func(ctx context.Context, typ string, query string)
+var (
+	logFuncMu sync.Mutex
+	logFunc   func(ctx context.Context, typ string, query string) func()
+)
 
 type LogFunc func(ctx context.Context, typ string, duration time.Duration, query string)
 
@@ -324,9 +326,9 @@ func SetLog(f LogFunc) {
 	logFuncMu.Lock()
 	defer logFuncMu.Unlock()
 
-	logFunc = func() func(context.Context, string, string) {
+	logFunc = func(ctx context.Context, typ string, query string) func() {
 		start := time.Now()
-		return func(ctx context.Context, typ string, query string) {
+		return func() {
 			f(ctx, typ, time.Since(start), query)
 		}
 	}

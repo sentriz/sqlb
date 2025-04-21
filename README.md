@@ -97,7 +97,7 @@ Much the same as slice of struct but for when there is only one row
 
 ```go
 var user User
-err := sqlb.Scan(ctx, db, &user, "SELECT * FROM users WHERE id = ?", 3)
+err := sqlb.ScanRow(ctx, db, &user, "SELECT * FROM users WHERE id = ?", 3)
 ```
 
 ### Primative types
@@ -105,7 +105,7 @@ err := sqlb.Scan(ctx, db, &user, "SELECT * FROM users WHERE id = ?", 3)
 ```go
 var name string
 var age int
-err := sqlb.Scan(ctx, db, sqlb.Primatives(&name, &age), "SELECT name, age FROM users WHERE id = ?", 3)
+err := sqlb.ScanRow(ctx, db, sqlb.Values(&name, &age), "SELECT name, age FROM users WHERE id = ?", 3)
 ```
 
 ## Full examples
@@ -123,10 +123,13 @@ if status != "" {
 }
 
 var total int
-err = sqlb.ScanRow(ctx, db, sqlb.Primative(&total), "SELECT count(1) FROM users WHERE ?", where)
+err = sqlb.ScanRow(ctx, db, sqlb.Values(&total), "SELECT count(1) FROM users WHERE ?", where)
 
-var users []*User
+var users []User
 err = sqlb.Scan(ctx, db, &users, "SELECT * FROM users WHERE ? LIMIT ? OFFSET ?", where, limit, offset)
+// or 
+var users []*User
+err = sqlb.ScanPtr(ctx, db, &users, "SELECT * FROM users WHERE ? LIMIT ? OFFSET ?", where, limit, offset)
 
 // SELECT count(1) FROM users WHERE 1 AND age > ? AND status = ? LIMIT ? OFFSET ?
 // SELECT * FROM users WHERE 1 AND age > ? AND status = ? LIMIT ? OFFSET ?
