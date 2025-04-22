@@ -85,7 +85,7 @@ func (u *User) ScanFrom(rows *sql.Rows) error {
     return rows.Scan(&u.ID, &u.Name, &u.Age)
 }
 
-var users []*User
+var users []User
 err := sqlb.Scan(ctx, db, &users, "SELECT * FROM users WHERE age > ?", 18)
 ```
 
