@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"iter"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -343,20 +344,21 @@ func TestExec(t *testing.T) {
 	be.NilErr(t, err)
 }
 
-func newDB(t *testing.T) *sql.DB {
-	db, err := sql.Open("sqlite3", ":memory:")
-	be.NilErr(t, err)
-	t.Cleanup(func() {
+func newDB(tb testing.TB) *sql.DB {
+	tmpDir := tb.TempDir()
+	db, err := sql.Open("sqlite3", filepath.Join(tmpDir, "db"))
+	be.NilErr(tb, err)
+	tb.Cleanup(func() {
 		db.Close()
 	})
 
-	ctx := t.Context()
+	ctx := tb.Context()
 	_, err = db.ExecContext(ctx, `create table tasks (id integer primary key autoincrement, name text not null default "", age integer not null default 0)`)
-	be.NilErr(t, err)
+	be.NilErr(tb, err)
 	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
-	be.NilErr(t, err)
+	be.NilErr(tb, err)
 	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
-	be.NilErr(t, err)
+	be.NilErr(tb, err)
 
 	return db
 }
