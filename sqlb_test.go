@@ -3,6 +3,7 @@ package sqlb_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"iter"
 	"path/filepath"
 	"testing"
@@ -342,6 +343,88 @@ func TestExec(t *testing.T) {
 
 	err := sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(task))
 	be.NilErr(t, err)
+}
+
+func TestStmtCache(t *testing.T) {
+	db := newDB(t)
+	ctx := t.Context()
+
+	var prepareCalls int
+	cdb := sqlb.NewStmtCache(prepareWrap{db, func(ctx context.Context, query string) {
+		t.Logf("prepared %q", query)
+		prepareCalls++
+	}})
+
+	var one int
+	err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1)
+	be.NilErr(t, err)
+	be.Equal(t, 1, one)
+
+	be.Equal(t, 1, prepareCalls) // inc
+
+	err = sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1)
+	be.NilErr(t, err)
+	be.Equal(t, 1, one)
+
+	be.Equal(t, 1, prepareCalls) // unchanged
+
+	err = sqlb.Exec(ctx, cdb, "select 2")
+	be.NilErr(t, err)
+
+	be.Equal(t, 2, prepareCalls) // inc
+
+	tx, err := db.Begin()
+	be.NilErr(t, err)
+
+	err = sqlb.Exec(ctx, tx, "select 3")
+	be.NilErr(t, err)
+
+	err = tx.Commit()
+	be.NilErr(t, err)
+
+	be.Equal(t, 2, prepareCalls) // unchanged
+
+	err = cdb.Close()
+	be.NilErr(t, err)
+}
+
+type prepareWrap struct {
+	*sql.DB
+	cb func(ctx context.Context, query string)
+}
+
+func (pw prepareWrap) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	pw.cb(ctx, query)
+	return pw.DB.PrepareContext(ctx, query)
+}
+
+func BenchmarkStmtCache(b *testing.B) {
+	type bcase[T any] struct {
+		name string
+		v    T
+	}
+	dbs := []bcase[func(tb testing.TB) sqlb.ExecDB]{
+		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(tb) }},
+		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(tb)) }},
+	}
+	queries := []bcase[sqlb.Query]{
+		{"simple", sqlb.NewQuery(`select 1 where ? and ? and ? not in (?)`, 1, 1, 0, 4)},
+		{"mid", sqlb.NewQuery(`select t1.id, t1.name, t1.age, (select count(*) from tasks where age > t1.age) as older_count from tasks t1 where t1.age > ? and t1.name like ? order by t1.age desc limit ?`, 30, "user%", 10)},
+		{"complex", sqlb.NewQuery(`select t1.id, t1.name, t1.age, case when t1.age < 18 then 'minor' when t1.age < 30 then 'young adult' when t1.age < 50 then 'adult' else 'senior' end as age_group, (select count(*) from tasks t2 where case when t2.age < 18 then 'minor' when t2.age < 30 then 'young adult' when t2.age < 50 then 'adult' else 'senior' end = case when t1.age < 18 then 'minor' when t1.age < 30 then 'young adult' when t1.age < 50 then 'adult' else 'senior' end) as count_in_group from tasks t1 where t1.age between ? and ? and (t1.name like ? or t1.id % 10 = 0) order by t1.age desc, t1.name limit ? offset ?`, 25, 50, "user%", 20, 0)},
+	}
+
+	for _, db := range dbs {
+		for _, query := range queries {
+			b.Run(fmt.Sprintf("%s-%s", db.name, query.name), func(b *testing.B) {
+				db := db.v(b)
+				q, args := query.v.SQL()
+				for b.Loop() {
+					_, err := db.ExecContext(b.Context(), q, args...)
+					be.NilErr(b, err)
+				}
+			})
+		}
+	}
 }
 
 func newDB(tb testing.TB) *sql.DB {

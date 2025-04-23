@@ -333,3 +333,79 @@ func SetLog(f LogFunc) {
 		}
 	}
 }
+
+type PrepareDB interface {
+	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
+}
+
+type StmtCache struct {
+	mu    sync.RWMutex
+	cache map[string]*sql.Stmt
+	db    PrepareDB
+}
+
+func NewStmtCache(db PrepareDB) *StmtCache {
+	return &StmtCache{
+		cache: make(map[string]*sql.Stmt),
+		db:    db,
+	}
+}
+
+func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	stmt, err := sc.getStmt(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return stmt.QueryContext(ctx, args...)
+}
+
+func (sc *StmtCache) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	stmt, err := sc.getStmt(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return stmt.ExecContext(ctx, args...)
+}
+
+func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
+	sc.mu.RLock()
+	stmt, ok := sc.cache[query]
+	sc.mu.RUnlock()
+	if ok {
+		return stmt, nil
+	}
+
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	// check again in case another goroutine prepared it
+	stmt, ok = sc.cache[query]
+	if ok {
+		return stmt, nil
+	}
+
+	stmt, err := sc.db.PrepareContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	sc.cache[query] = stmt
+	return stmt, nil
+}
+
+func (sc *StmtCache) Close() error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	var errs []error
+	for _, stmt := range sc.cache {
+		if err := stmt.Close(); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("closing statements: %v", err)
+	}
+	return nil
+}
