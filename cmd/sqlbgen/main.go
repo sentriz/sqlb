@@ -85,19 +85,19 @@ func main() {
 
 		fields := typeFields[typeName]
 
+		firstChar := strings.ToLower(string([]rune(typeName)[0]))
+
 		fmt.Fprintf(destf, "func _() {\n")
 		fmt.Fprintf(destf, "\t// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.\n")
-		fmt.Fprintf(destf, "\ttype _t = %s\n", typeName)
+		fmt.Fprintf(destf, "\tvar %s %s\n", firstChar, typeName)
 
 		var fieldRefs []string
 		for _, field := range fields {
-			fieldRefs = append(fieldRefs, fmt.Sprintf("_t{}.%s", field))
+			fieldRefs = append(fieldRefs, fmt.Sprintf("%s.%s", firstChar, field))
 		}
 
-		fmt.Fprintf(destf, "\t_ = _t{%s}\n", strings.Join(fieldRefs, ", "))
+		fmt.Fprintf(destf, "\t_ = %s{%s}\n", typeName, strings.Join(fieldRefs, ", "))
 		fmt.Fprintf(destf, "}\n")
-
-		firstChar := strings.ToLower(string(typeName[0]))
 
 		fmt.Fprintf(destf, "\n")
 		fmt.Fprintf(destf, "func (%s) PrimaryKey() string {\n", typeName)

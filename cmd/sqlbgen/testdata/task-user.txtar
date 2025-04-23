@@ -32,8 +32,8 @@ import "database/sql"
 
 func _() {
 	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
-	type _t = Task
-	_ = _t{_t{}.ID, _t{}.Name, _t{}.Age, _t{}.UserID}
+	var t Task
+	_ = Task{t.ID, t.Name, t.Age, t.UserID}
 }
 
 func (Task) PrimaryKey() string {
@@ -50,8 +50,8 @@ func (t *Task) ScanFrom(rows *sql.Rows) error {
 
 func _() {
 	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
-	type _t = User
-	_ = _t{_t{}.ID, _t{}.Name}
+	var u User
+	_ = User{u.ID, u.Name}
 }
 
 func (User) PrimaryKey() string {
