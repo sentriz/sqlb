@@ -85,7 +85,7 @@ type Updatable interface {
 	Values() []sql.NamedArg
 }
 
-func UpdateSQL(item Updatable) Query {
+func UpdateSQL(item Updatable) SQLer {
 	var set bool
 	var b Query
 	for _, v := range item.Values() {
@@ -107,7 +107,7 @@ type Insertable interface {
 	Values() []sql.NamedArg
 }
 
-func InsertSQL[T Insertable](items ...T) Query {
+func InsertSQL[T Insertable](items ...T) SQLer {
 	if len(items) == 0 {
 		panic("InsertSQL called with zero arguments")
 	}
