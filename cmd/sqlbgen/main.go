@@ -7,9 +7,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 func main() {
@@ -128,13 +128,16 @@ func main() {
 	}
 }
 
-var (
-	luExpr  = regexp.MustCompile(`([a-z0-9])([A-Z])`)
-	uulExpr = regexp.MustCompile(`([A-Z])([A-Z][a-z])`)
-)
-
 func toSnake(s string) string {
-	s = luExpr.ReplaceAllString(s, "${1}_${2}")
-	s = uulExpr.ReplaceAllString(s, "${1}_${2}")
-	return strings.ToLower(s)
+	var result strings.Builder
+	for i, char := range s {
+		if i > 0 && unicode.IsUpper(char) {
+			if unicode.IsLower(rune(s[i-1])) || unicode.IsDigit(rune(s[i-1])) || (i+1 < len(s) && unicode.IsUpper(char) && i+1 < len(s) && unicode.IsLower(rune(s[i+1]))) {
+				result.WriteRune('_')
+			}
+		}
+		result.WriteRune(unicode.ToLower(char))
+	}
+
+	return result.String()
 }
