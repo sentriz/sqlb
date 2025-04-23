@@ -1,14 +1,14 @@
 module go.senan.xyz/sqlb
 
-go 1.23.0
+go 1.24
 
+// testing only
 require (
-	github.com/carlmjohnson/be v0.23.2
-	github.com/ncruces/go-sqlite3 v0.18.2
-)
-
-require (
+	github.com/carlmjohnson/be v0.24.1
+	github.com/ncruces/go-sqlite3 v0.25.0
 	github.com/ncruces/julianday v1.0.0 // indirect
-	github.com/tetratelabs/wazero v1.8.0 // indirect
-	golang.org/x/sys v0.25.0 // indirect
+	github.com/rogpeppe/go-internal v1.14.1
+	github.com/tetratelabs/wazero v1.9.0 // indirect
+	golang.org/x/sys v0.32.0 // indirect
+	golang.org/x/tools v0.32.0 // indirect
 )
