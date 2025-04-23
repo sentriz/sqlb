@@ -22,6 +22,12 @@ package task
 
 import "database/sql"
 
+func _() {
+	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
+	type _t = Task
+	_ = _t{_t{}.ID, _t{}.Embedded}
+}
+
 func (Task) PrimaryKey() string {
 	return "id"
 }

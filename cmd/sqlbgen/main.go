@@ -81,33 +81,46 @@ func main() {
 	fmt.Fprintf(destf, "import \"database/sql\"\n")
 
 	for _, typeName := range typeNames {
-		columns := typeFields[typeName]
-
 		fmt.Fprintf(destf, "\n")
+
+		fields := typeFields[typeName]
+
+		fmt.Fprintf(destf, "func _() {\n")
+		fmt.Fprintf(destf, "\t// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.\n")
+		fmt.Fprintf(destf, "\ttype _t = %s\n", typeName)
+
+		var fieldRefs []string
+		for _, field := range fields {
+			fieldRefs = append(fieldRefs, fmt.Sprintf("_t{}.%s", field))
+		}
+
+		fmt.Fprintf(destf, "\t_ = _t{%s}\n", strings.Join(fieldRefs, ", "))
+		fmt.Fprintf(destf, "}\n")
 
 		firstChar := strings.ToLower(string(typeName[0]))
 
+		fmt.Fprintf(destf, "\n")
 		fmt.Fprintf(destf, "func (%s) PrimaryKey() string {\n", typeName)
 		fmt.Fprintf(destf, "\treturn \"id\"\n") // TODO: flexible PK(s)
 		fmt.Fprintf(destf, "}\n")
-		fmt.Fprintf(destf, "\n")
 
+		fmt.Fprintf(destf, "\n")
 		fmt.Fprintf(destf, "func (%s %s) Values() []sql.NamedArg {\n", firstChar, typeName)
 
 		var namedArgs []string
-		for _, c := range columns {
-			namedArgs = append(namedArgs, fmt.Sprintf("sql.Named(\"%s\", %s.%s)", toSnake(c), firstChar, c))
+		for _, f := range fields {
+			namedArgs = append(namedArgs, fmt.Sprintf("sql.Named(\"%s\", %s.%s)", toSnake(f), firstChar, f))
 		}
 
 		fmt.Fprintf(destf, "\treturn []sql.NamedArg{%s}\n", strings.Join(namedArgs, ", "))
 		fmt.Fprintf(destf, "}\n")
-		fmt.Fprintf(destf, "\n")
 
+		fmt.Fprintf(destf, "\n")
 		fmt.Fprintf(destf, "func (%s *%s) ScanFrom(rows *sql.Rows) error {\n", firstChar, typeName)
 
 		var dests []string
-		for _, c := range columns {
-			dests = append(dests, fmt.Sprintf("&%s.%s", firstChar, c))
+		for _, f := range fields {
+			dests = append(dests, fmt.Sprintf("&%s.%s", firstChar, f))
 		}
 
 		fmt.Fprintf(destf, "\treturn rows.Scan(%s)\n", strings.Join(dests, ", "))

@@ -30,6 +30,12 @@ package task
 
 import "database/sql"
 
+func _() {
+	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
+	type _t = Task
+	_ = _t{_t{}.ID, _t{}.Name, _t{}.Age, _t{}.UserID}
+}
+
 func (Task) PrimaryKey() string {
 	return "id"
 }
@@ -40,6 +46,12 @@ func (t Task) Values() []sql.NamedArg {
 
 func (t *Task) ScanFrom(rows *sql.Rows) error {
 	return rows.Scan(&t.ID, &t.Name, &t.Age, &t.UserID)
+}
+
+func _() {
+	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
+	type _t = User
+	_ = _t{_t{}.ID, _t{}.Name}
 }
 
 func (User) PrimaryKey() string {
