@@ -7,7 +7,6 @@ import (
 	"iter"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"go.senan.xyz/sqlb"
 
@@ -20,14 +19,14 @@ func TestBuild(t *testing.T) {
 	t.Parallel()
 
 	var b sqlb.Query
-	b.Append("select * from jobs")
+	b.Append("select * from tasks")
 	b.Append("where 1")
 	b.Append("and one=?", 1)
 	b.Append("and two=?", 2)
 	b.Append("returning *")
 
 	query, args := b.SQL()
-	be.Equal(t, "select * from jobs where 1 and one=? and two=? returning *", query)
+	be.Equal(t, "select * from tasks where 1 and one=? and two=? returning *", query)
 	be.DeepEqual(t, []any{1, 2}, args)
 }
 
@@ -46,10 +45,10 @@ func TestBuildSubquery(t *testing.T) {
 
 	var b sqlb.Query
 	b.Append("select * from (?) union (?)",
-		sqlb.NewQuery("select * from jobs where a=?",
+		sqlb.NewQuery("select * from tasks where a=?",
 			"a",
 		),
-		sqlb.NewQuery("select * from jobs where a=? and ?",
+		sqlb.NewQuery("select * from tasks where a=? and ?",
 			"aa",
 			sqlb.NewQuery("xx=?", 10),
 		),
@@ -57,7 +56,7 @@ func TestBuildSubquery(t *testing.T) {
 	b.Append("where ?", where)
 
 	query, args := b.SQL()
-	be.Equal(t, "select * from (select * from jobs where a=?) union (select * from jobs where a=? and xx=?) where three=? or four=?", query)
+	be.Equal(t, "select * from (select * from tasks where a=?) union (select * from tasks where a=? and xx=?) where three=? or four=?", query)
 	be.DeepEqual(t, []any{"a", "aa", 10, 3, 4}, args)
 }
 
@@ -74,6 +73,37 @@ func TestBuildPanic(t *testing.T) {
 
 	var b sqlb.Query
 	b.Append("one=?, two=?, three=?", 1, 2)
+}
+
+func TestInsert(t *testing.T) {
+	db := newDB(t)
+	ctx := t.Context()
+
+	task := Task{Name: "the name", Age: 32}
+	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
+	be.NilErr(t, err)
+	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 32}, task)
+}
+
+func TestInsertUpdate(t *testing.T) {
+	db := newDB(t)
+	ctx := t.Context()
+
+	task := Task{Name: "name", Age: 100}
+
+	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
+	be.NilErr(t, err)
+	be.Nonzero(t, task.ID)
+
+	task.Age = 101
+	err = sqlb.ScanRow(ctx, db, &task, "update tasks set ? returning *", sqlb.UpdateSQL(task))
+	be.NilErr(t, err)
+
+	var readTask Task
+	err = sqlb.ScanRow(ctx, db, &readTask, "select * from tasks where id = ?", task.ID)
+	be.NilErr(t, err)
+	be.Equal(t, 101, readTask.Age)
+	be.DeepEqual(t, task, readTask)
 }
 
 func TestUpdate(t *testing.T) {
@@ -129,18 +159,6 @@ func TestInsertBuildMany(t *testing.T) {
 	be.DeepEqual(t, []any{"a", 0, "b", 1, "c", 2}, args)
 }
 
-func TestInsert(t *testing.T) {
-	t.Parallel()
-
-	db := newDB(t)
-	ctx := t.Context()
-
-	task := Task{Name: "the name", Age: 32}
-	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
-	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 32}, task)
-}
-
 func TestIter(t *testing.T) {
 	t.Parallel()
 
@@ -183,26 +201,6 @@ func TestIter(t *testing.T) {
 	be.Equal(t, Task{}, task)
 }
 
-type Task struct {
-	ID   int
-	Name string
-	Age  int
-}
-
-func (t Task) PrimaryKey() string {
-	return "id"
-}
-func (t Task) Values() []sql.NamedArg {
-	return []sql.NamedArg{
-		sql.Named("id", t.ID),
-		sql.Named("name", t.Name),
-		sql.Named("age", t.Age),
-	}
-}
-func (t *Task) ScanFrom(rows *sql.Rows) error {
-	return rows.Scan(&t.ID, &t.Name, &t.Age)
-}
-
 func TestScan(t *testing.T) {
 	t.Parallel()
 
@@ -221,116 +219,6 @@ func TestScan(t *testing.T) {
 	err = sqlb.ScanRow(ctx, db, &two, "select * from tasks where id=?", 2)
 	be.NilErr(t, err)
 	be.DeepEqual(t, Task{ID: 2, Name: "two"}, two)
-}
-
-type JobStatus string
-
-const (
-	StatusEnqueued   JobStatus = ""
-	StatusInProgress JobStatus = "in-progress"
-	StatusNeedsInput JobStatus = "needs-input"
-	StatusError      JobStatus = "error"
-	StatusComplete   JobStatus = "complete"
-)
-
-type Operation string
-
-const (
-	OperationCopy Operation = "copy"
-	OperationMove Operation = "move"
-)
-
-type SearchResult struct {
-	Score   float64
-	DestDir string
-	Diff    []string
-}
-
-type Job struct {
-	ID                   uint64
-	Status               JobStatus
-	Error                string
-	Operation            Operation
-	Time                 time.Time
-	UseMBID              string
-	SourcePath, DestPath string
-	SearchResult         sqlb.JSON[*SearchResult]
-}
-
-func (Job) PrimaryKey() string {
-	return "id"
-}
-func (j Job) Values() []sql.NamedArg {
-	return []sql.NamedArg{
-		sql.Named("id", j.ID),
-		sql.Named("status", j.Status),
-		sql.Named("error", j.Error),
-		sql.Named("operation", j.Operation),
-		sql.Named("time", j.Time),
-		sql.Named("use_mbid", j.UseMBID),
-		sql.Named("source_path", j.SourcePath),
-		sql.Named("dest_path", j.DestPath),
-		sql.Named("search_result", j.SearchResult),
-	}
-}
-func (j *Job) ScanFrom(rows *sql.Rows) error {
-	return rows.Scan(&j.ID, &j.Status, &j.Error, &j.Operation, &j.Time, &j.UseMBID, &j.SourcePath, &j.DestPath, &j.SearchResult)
-}
-
-func jobsMigrate(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, `
-		create table if not exists jobs (
-			id            integer primary key autoincrement,
-			status        text not null default "",
-			error         text not null default "",
-			operation     text not null,
-			time          timestamp not null,
-			use_mbid      text not null default "",
-			source_path   text not null,
-			dest_path     text not null default "",
-			search_result jsonb
-		);
-
-		create index if not exists idx_jobs_status on jobs (status);
-		create index if not exists idx_jobs_source_path on jobs (source_path);
-	`)
-	return err
-}
-
-func TestInsertJob(t *testing.T) {
-	t.Parallel()
-
-	db := newDB(t)
-	ctx := t.Context()
-
-	err := jobsMigrate(ctx, db)
-	be.NilErr(t, err)
-
-	job := Job{
-		Status:     StatusInProgress,
-		Operation:  OperationMove,
-		Time:       time.Now(),
-		SourcePath: "/some/path",
-		SearchResult: sqlb.JSON[*SearchResult]{&SearchResult{
-			Score:   100,
-			DestDir: "some dir",
-			Diff:    []string{"one", "two"},
-		}},
-	}
-
-	err = sqlb.ScanRow(ctx, db, &job, "insert into jobs ? returning *", sqlb.InsertSQL(job))
-	be.NilErr(t, err)
-	be.Nonzero(t, job.ID)
-
-	job.Status = StatusComplete
-	err = sqlb.ScanRow(ctx, db, &job, "update jobs set ? returning *", sqlb.UpdateSQL(job))
-	be.NilErr(t, err)
-
-	var readJob Job
-	err = sqlb.ScanRow(ctx, db, &readJob, "select * from jobs where id = ?", job.ID)
-	be.NilErr(t, err)
-	be.Equal(t, 100, readJob.SearchResult.Data.Score)
-	be.DeepEqual(t, job, readJob)
 }
 
 func TestExec(t *testing.T) {
@@ -432,7 +320,7 @@ func newDB(tb testing.TB) *sql.DB {
 	db, err := sql.Open("sqlite3", filepath.Join(tmpDir, "db"))
 	be.NilErr(tb, err)
 	tb.Cleanup(func() {
-		db.Close()
+		_ = db.Close()
 	})
 
 	ctx := tb.Context()
@@ -444,4 +332,43 @@ func newDB(tb testing.TB) *sql.DB {
 	be.NilErr(tb, err)
 
 	return db
+}
+
+type Task struct {
+	ID   int
+	Name string
+	Age  int
+}
+
+func (t Task) PrimaryKey() string {
+	return "id"
+}
+
+func (t Task) Values() []sql.NamedArg {
+	return []sql.NamedArg{
+		sql.Named("id", t.ID),
+		sql.Named("name", t.Name),
+		sql.Named("age", t.Age),
+	}
+}
+
+func (t *Task) ScanFrom(rows *sql.Rows) error {
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	dests := make([]any, 0, len(columns))
+	for _, c := range columns {
+		switch c {
+		case "id":
+			dests = append(dests, &t.ID)
+		case "name":
+			dests = append(dests, &t.Name)
+		case "age":
+			dests = append(dests, &t.Age)
+		default:
+			return fmt.Errorf("unknown column name %q", c)
+		}
+	}
+	return rows.Scan(dests...)
 }
