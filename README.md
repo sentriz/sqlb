@@ -57,7 +57,7 @@ var name string
 var age int
 err := sqlb.ScanRow(ctx, db, sqlb.Values(&name, &age), "SELECT name, age FROM users WHERE id = ?", 1)
 
-// Iterate over results (Go 1.22+)
+// Iterate over results
 for user, err := range sqlb.Iter[User](ctx, db, "SELECT * FROM users") {
     if err != nil {
         // handle error
@@ -85,6 +85,32 @@ err := sqlb.ScanRow(ctx, db, &user, "UPDATE users SET ? WHERE id = ? RETURNING *
 
 // Execute a query
 err := sqlb.Exec(ctx, db, "DELETE FROM users WHERE id = ?", 1)
+```
+
+### Prepared Statement Cache
+
+```go
+// Create a statement cache that wraps a database connection
+stmtCache := sqlb.NewStmtCache(db)
+defer stmtCache.Close()
+
+// Use the cache with any sqlb function - identical API to regular db
+var users []User
+err := sqlb.Scan(ctx, stmtCache, &users, "SELECT * FROM users WHERE age > ?", 18)
+
+// Statements are automatically prepared and reused
+err = sqlb.Exec(ctx, stmtCache, "INSERT INTO users (name) VALUES (?)", "Alice")
+// Second execution reuses the prepared statement
+err = sqlb.Exec(ctx, stmtCache, "INSERT INTO users (name) VALUES (?)", "Bob")
+
+// Using statement cache with transactions
+tx, err := db.BeginTx(ctx, nil)
+check(err)
+defer tx.Rollback()
+txCache := sqlb.NewStmtCache(tx)
+defer txCache.Close()
+err = sqlb.Exec(ctx, txCache, "UPDATE users SET status = ? WHERE id = ?", "active", 1)
+err = sqlb.Exec(ctx, txCache, "UPDATE users SET status = ? WHERE id = ?", "inactive" 2)
 ```
 
 ### JSON Support
