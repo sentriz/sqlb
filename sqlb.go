@@ -155,21 +155,8 @@ func Scan[T any, pT interface {
 	Scannable
 	*T
 }](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
-	query, args = NewQuery(query, args...).SQL()
-
-	if f := logFunc; f != nil {
-		defer f(ctx, "query", query)()
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("query: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var t T
-		if err := pT(&t).ScanFrom(rows); err != nil {
+	for t, err := range Iter[T, pT](ctx, db, query, args...) {
+		if err != nil {
 			return err
 		}
 		*dest = append(*dest, t)
@@ -181,46 +168,11 @@ func ScanPtr[T any, pT interface {
 	Scannable
 	*T
 }](ctx context.Context, db ScanDB, dest *[]*T, query string, args ...any) error {
-	query, args = NewQuery(query, args...).SQL()
-
-	if f := logFunc; f != nil {
-		defer f(ctx, "query", query)()
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("query: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var t T
-		if err := pT(&t).ScanFrom(rows); err != nil {
+	for t, err := range Iter[T, pT](ctx, db, query, args...) {
+		if err != nil {
 			return err
 		}
 		*dest = append(*dest, &t)
-	}
-	return nil
-}
-
-func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
-	query, args = NewQuery(query, args...).SQL()
-
-	if f := logFunc; f != nil {
-		defer f(ctx, "query row", query)()
-	}
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return sql.ErrNoRows
-	}
-	if err := dest.ScanFrom(rows); err != nil {
-		return err
 	}
 	return nil
 }
@@ -233,7 +185,7 @@ func Iter[T any, pT interface {
 		query, args = NewQuery(query, args...).SQL()
 
 		if f := logFunc; f != nil {
-			defer f(ctx, "iter", query)()
+			defer f(ctx, "query", query)()
 		}
 
 		rows, err := db.QueryContext(ctx, query, args...)
@@ -258,6 +210,28 @@ func Iter[T any, pT interface {
 			}
 		}
 	}
+}
+
+func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+
+	if f := logFunc; f != nil {
+		defer f(ctx, "query row", query)()
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return sql.ErrNoRows
+	}
+	if err := dest.ScanFrom(rows); err != nil {
+		return err
+	}
+	return nil
 }
 
 type ExecDB interface {
