@@ -8,11 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"go.senan.xyz/sqlb"
-
 	"github.com/carlmjohnson/be"
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
+	"go.senan.xyz/sqlb"
 )
 
 func TestBuild(t *testing.T) {
@@ -82,7 +81,7 @@ func TestInsert(t *testing.T) {
 	task := Task{Name: "the name", Age: 32}
 	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
 	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 32}, task)
+	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 32}, task)
 }
 
 func TestInsertUpdate(t *testing.T) {
@@ -115,7 +114,7 @@ func TestUpdate(t *testing.T) {
 	var task Task
 	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks (name) values (?) returning *", "the name")
 	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 0}, task)
+	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 0}, task)
 
 	task.Age = 69
 
@@ -123,12 +122,12 @@ func TestUpdate(t *testing.T) {
 	query, args := build.SQL()
 
 	be.Equal(t, "update tasks set name=? , age=? where id=? returning *", query)
-	be.DeepEqual(t, []any{"the name", 69, 3}, args)
+	be.DeepEqual(t, []any{"the name", 69, 1}, args)
 
 	query, values := build.SQL()
 	err = sqlb.ScanRow(ctx, db, &task, query, values...)
 	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 3, Name: "the name", Age: 69}, task)
+	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 69}, task)
 }
 
 func TestInsertBuild(t *testing.T) {
@@ -207,8 +206,13 @@ func TestScan(t *testing.T) {
 	db := newDB(t)
 	ctx := t.Context()
 
+	_, err := db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
+	be.NilErr(t, err)
+	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
+	be.NilErr(t, err)
+
 	var out []*Task
-	err := sqlb.ScanPtr(ctx, db, &out, "select * from tasks order by id")
+	err = sqlb.ScanPtr(ctx, db, &out, "select * from tasks order by id")
 	be.NilErr(t, err)
 	be.DeepEqual(t, []*Task{
 		{ID: 1, Name: "one"},
@@ -231,6 +235,27 @@ func TestExec(t *testing.T) {
 
 	err := sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(task))
 	be.NilErr(t, err)
+}
+
+func TestJSON(t *testing.T) {
+	db := newDB(t)
+	ctx := t.Context()
+
+	expBook := Book{
+		Details: sqlb.NewJSON(map[string]any{
+			"author": "abc",
+			"date":   2025,
+		}),
+	}
+
+	var id int
+	err := sqlb.ScanRow(ctx, db, sqlb.Values(&id), `insert into books ? returning id`, sqlb.InsertSQL(expBook))
+	be.NilErr(t, err)
+
+	var book Book
+	err = sqlb.ScanRow(ctx, db, &book, `select * from books where id=?`, id)
+	be.NilErr(t, err)
+	be.Equal(t, "abc", book.Details.Data["author"])
 }
 
 func TestStmtCache(t *testing.T) {
@@ -326,9 +351,7 @@ func newDB(tb testing.TB) *sql.DB {
 	ctx := tb.Context()
 	_, err = db.ExecContext(ctx, `create table tasks (id integer primary key autoincrement, name text not null default "", age integer not null default 0)`)
 	be.NilErr(tb, err)
-	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
-	be.NilErr(tb, err)
-	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
+	_, err = db.ExecContext(ctx, `create table books (id integer primary key autoincrement, details json)`)
 	be.NilErr(tb, err)
 
 	return db
@@ -340,16 +363,12 @@ type Task struct {
 	Age  int
 }
 
-func (t Task) PrimaryKey() string {
+func (Task) PrimaryKey() string {
 	return "id"
 }
 
 func (t Task) Values() []sql.NamedArg {
-	return []sql.NamedArg{
-		sql.Named("id", t.ID),
-		sql.Named("name", t.Name),
-		sql.Named("age", t.Age),
-	}
+	return []sql.NamedArg{sql.Named("id", t.ID), sql.Named("name", t.Name), sql.Named("age", t.Age)}
 }
 
 func (t *Task) ScanFrom(rows *sql.Rows) error {
@@ -366,6 +385,38 @@ func (t *Task) ScanFrom(rows *sql.Rows) error {
 			dests = append(dests, &t.Name)
 		case "age":
 			dests = append(dests, &t.Age)
+		default:
+			return fmt.Errorf("unknown column name %q", c)
+		}
+	}
+	return rows.Scan(dests...)
+}
+
+type Book struct {
+	ID      int
+	Details sqlb.JSON[map[string]any]
+}
+
+func (Book) PrimaryKey() string {
+	return "id"
+}
+
+func (b Book) Values() []sql.NamedArg {
+	return []sql.NamedArg{sql.Named("id", b.ID), sql.Named("details", b.Details)}
+}
+
+func (b *Book) ScanFrom(rows *sql.Rows) error {
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	dests := make([]any, 0, len(columns))
+	for _, c := range columns {
+		switch c {
+		case "id":
+			dests = append(dests, &b.ID)
+		case "details":
+			dests = append(dests, &b.Details)
 		default:
 			return fmt.Errorf("unknown column name %q", c)
 		}
