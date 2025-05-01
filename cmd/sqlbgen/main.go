@@ -78,7 +78,10 @@ func main() {
 	fmt.Fprintf(destf, "\n")
 	fmt.Fprintf(destf, "package %s\n", goPackage)
 	fmt.Fprintf(destf, "\n")
-	fmt.Fprintf(destf, "import \"database/sql\"\n")
+	fmt.Fprintf(destf, "import (\n")
+	fmt.Fprintf(destf, "\t\"database/sql\"\n")
+	fmt.Fprintf(destf, "\t\"fmt\"\n")
+	fmt.Fprintf(destf, ")\n")
 
 	for _, typeName := range typeNames {
 		fmt.Fprintf(destf, "\n")

@@ -28,7 +28,10 @@ type NotMentioned struct {
 
 package task
 
-import "database/sql"
+import (
+	"database/sql"
+	"fmt"
+)
 
 func _() {
 	// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.
