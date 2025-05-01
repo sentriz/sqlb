@@ -37,5 +37,20 @@ func (t Task) Values() []sql.NamedArg {
 }
 
 func (t *Task) ScanFrom(rows *sql.Rows) error {
-	return rows.Scan(&t.ID, &t.Embedded)
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	dests := make([]any, 0, len(columns))
+	for _, c := range columns {
+		switch c {
+		case "id":
+			dests = append(dests, &t.ID)
+		case "embedded":
+			dests = append(dests, &t.Embedded)
+		default:
+			return fmt.Errorf("unknown column name %q", c)
+		}
+	}
+	return rows.Scan(dests...)
 }

@@ -117,13 +117,25 @@ func main() {
 
 		fmt.Fprintf(destf, "\n")
 		fmt.Fprintf(destf, "func (%s *%s) ScanFrom(rows *sql.Rows) error {\n", firstChar, typeName)
+		fmt.Fprintf(destf, "\tcolumns, err := rows.Columns()\n")
+		fmt.Fprintf(destf, "\tif err != nil {\n")
+		fmt.Fprintf(destf, "\t\treturn err\n")
+		fmt.Fprintf(destf, "\t}\n")
+		fmt.Fprintf(destf, "\tdests := make([]any, 0, len(columns))\n")
+		fmt.Fprintf(destf, "\tfor _, c := range columns {\n")
+		fmt.Fprintf(destf, "\t\tswitch c {\n")
 
-		var dests []string
+		// Add case statements for each field
 		for _, f := range fields {
-			dests = append(dests, fmt.Sprintf("&%s.%s", firstChar, f))
+			fmt.Fprintf(destf, "\t\tcase \"%s\":\n", toSnake(f))
+			fmt.Fprintf(destf, "\t\t\tdests = append(dests, &%s.%s)\n", firstChar, f)
 		}
 
-		fmt.Fprintf(destf, "\treturn rows.Scan(%s)\n", strings.Join(dests, ", "))
+		fmt.Fprintf(destf, "\t\tdefault:\n")
+		fmt.Fprintf(destf, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", c)\n")
+		fmt.Fprintf(destf, "\t\t}\n")
+		fmt.Fprintf(destf, "\t}\n")
+		fmt.Fprintf(destf, "\treturn rows.Scan(dests...)\n")
 		fmt.Fprintf(destf, "}\n")
 	}
 }

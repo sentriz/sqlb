@@ -45,7 +45,26 @@ func (t Task) Values() []sql.NamedArg {
 }
 
 func (t *Task) ScanFrom(rows *sql.Rows) error {
-	return rows.Scan(&t.ID, &t.Name, &t.Age, &t.UserID)
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	dests := make([]any, 0, len(columns))
+	for _, c := range columns {
+		switch c {
+		case "id":
+			dests = append(dests, &t.ID)
+		case "name":
+			dests = append(dests, &t.Name)
+		case "age":
+			dests = append(dests, &t.Age)
+		case "user_id":
+			dests = append(dests, &t.UserID)
+		default:
+			return fmt.Errorf("unknown column name %q", c)
+		}
+	}
+	return rows.Scan(dests...)
 }
 
 func _() {
@@ -63,5 +82,20 @@ func (u User) Values() []sql.NamedArg {
 }
 
 func (u *User) ScanFrom(rows *sql.Rows) error {
-	return rows.Scan(&u.ID, &u.Name)
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+	dests := make([]any, 0, len(columns))
+	for _, c := range columns {
+		switch c {
+		case "id":
+			dests = append(dests, &u.ID)
+		case "name":
+			dests = append(dests, &u.Name)
+		default:
+			return fmt.Errorf("unknown column name %q", c)
+		}
+	}
+	return rows.Scan(dests...)
 }
