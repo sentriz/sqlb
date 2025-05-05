@@ -143,6 +143,23 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 	)
 }
 
+func InSQL[T any](items ...T) SQLer {
+	if len(items) == 0 {
+		panic("InsertSQL called with zero arguments")
+	}
+
+	placeholders := make([]string, len(items))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	values := make([]any, 0, len(items))
+	for _, v := range items {
+		values = append(values, v)
+	}
+
+	return NewQuery(fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")), values...)
+}
+
 type Scannable interface {
 	ScanFrom(rows *sql.Rows) error
 }

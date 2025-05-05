@@ -74,6 +74,12 @@ func TestBuildPanic(t *testing.T) {
 	b.Append("one=?, two=?, three=?", 1, 2)
 }
 
+func TestInSQL(t *testing.T) {
+	query, args := sqlb.InSQL("one", "two", "three").SQL()
+	be.Equal(t, "(?, ?, ?)", query)
+	be.DeepEqual(t, []any{"one", "two", "three"}, args)
+}
+
 func TestInsert(t *testing.T) {
 	db := newDB(t)
 	ctx := t.Context()
