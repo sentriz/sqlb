@@ -270,14 +270,44 @@ type SQLer interface {
 	SQL() (string, []any)
 }
 
-type primatives []any
+func Values(dests ...any) Scannable {
+	return scanValues(dests)
+}
 
-func (p primatives) ScanFrom(rows *sql.Rows) error {
+type scanValues []any
+
+func (p scanValues) ScanFrom(rows *sql.Rows) error {
 	return rows.Scan(p...)
 }
 
-func Values(dests ...any) Scannable {
-	return primatives(dests)
+func Slice[T any](s *[]T) Scannable {
+	return (*scanSlice[T])(s)
+}
+
+type scanSlice[T any] []T
+
+func (p *scanSlice[T]) ScanFrom(rows *sql.Rows) error {
+	var v T
+	if err := rows.Scan(&v); err != nil {
+		return err
+	}
+	*p = append(*p, v)
+	return nil
+}
+
+func Set[T comparable](s map[T]struct{}) Scannable {
+	return (scanSet[T])(s)
+}
+
+type scanSet[T comparable] map[T]struct{}
+
+func (p scanSet[T]) ScanFrom(rows *sql.Rows) error {
+	var v T
+	if err := rows.Scan(&v); err != nil {
+		return err
+	}
+	p[v] = struct{}{}
+	return nil
 }
 
 type JSON[T any] struct {
