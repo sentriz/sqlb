@@ -269,6 +269,24 @@ func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string
 	return nil
 }
 
+// Collect executes the query and scans all rows into the single dest. To be used for example with [Slice] or [Set],
+func Collect[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := dest.ScanFrom(rows); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type ExecDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

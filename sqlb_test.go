@@ -244,6 +244,36 @@ func TestExec(t *testing.T) {
 	be.NilErr(t, err)
 }
 
+func TestCollect(t *testing.T) {
+	t.Parallel()
+
+	db := newDB(t)
+	ctx := t.Context()
+
+	_, err := db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
+	be.NilErr(t, err)
+	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
+	be.NilErr(t, err)
+
+	t.Run("slice", func(t *testing.T) {
+		t.Parallel()
+
+		var out []int
+		err := sqlb.Collect(ctx, db, sqlb.Slice(&out), "select id from tasks order by id")
+		be.NilErr(t, err)
+		be.DeepEqual(t, []int{1, 2}, out)
+	})
+
+	t.Run("set", func(t *testing.T) {
+		t.Parallel()
+
+		var out = map[int]struct{}{}
+		err := sqlb.Collect(ctx, db, sqlb.Set(out), "select id from tasks order by id")
+		be.NilErr(t, err)
+		be.DeepEqual(t, map[int]struct{}{1: {}, 2: {}}, out)
+	})
+}
+
 func TestHook(t *testing.T) {
 	db := newDB(t)
 	ctx := t.Context()
