@@ -1,3 +1,5 @@
+// Package sqlb provides a flexible and type-safe SQL query builder.
+// It enables building, executing, and scanning SQL queries in a composable manner.
 package sqlb
 
 import (
@@ -13,17 +15,21 @@ import (
 	"time"
 )
 
+// Query represents a composable SQL query builder with arguments.
 type Query struct {
 	query *strings.Builder
 	args  []any
 }
 
+// NewQuery creates a new Query by appending the initial query string and arguments.
 func NewQuery(query string, args ...any) Query {
 	var q Query
 	q.Append(query, args...)
 	return q
 }
 
+// Append adds a SQL fragment and corresponding arguments to the Query.
+// The number of arguments must match the number of '?' placeholders in the fragment.
 func (q *Query) Append(query string, args ...any) {
 	if want, got := strings.Count(query, "?"), len(args); want != got {
 		panic(fmt.Sprintf("want %d args, got %d", want, got))
@@ -41,6 +47,8 @@ func (q *Query) Append(query string, args ...any) {
 	q.args = append(q.args, args...)
 }
 
+// SQL returns the composed SQL string and flattened argument slice.
+// If any argument implements SQLer, they are expanded recursively in-place.
 func (q Query) SQL() (string, []any) {
 	// fast path
 	var hasSQLer bool
@@ -80,11 +88,14 @@ func (q Query) SQL() (string, []any) {
 	return query.String(), args
 }
 
+// Updatable represents a struct that can produce its primary key and values for updates.
 type Updatable interface {
 	PrimaryKey() string
 	Values() []sql.NamedArg
 }
 
+// UpdateSQL builds a SQLer representing the update for the Updatable.
+// Fields matching the primary key are skipped and not updated.
 func UpdateSQL(item Updatable) SQLer {
 	var set bool
 	var b Query
@@ -102,11 +113,14 @@ func UpdateSQL(item Updatable) SQLer {
 	return b
 }
 
+// Insertable represents a struct that can provide a primary key and values for insertion.
 type Insertable interface {
 	PrimaryKey() string
 	Values() []sql.NamedArg
 }
 
+// InsertSQL builds a SQLer representing an INSERT for one or more Insertable items.
+// Skips the primary key field in columns and values.
 func InsertSQL[T Insertable](items ...T) SQLer {
 	if len(items) == 0 {
 		panic("InsertSQL called with zero arguments")
@@ -143,6 +157,8 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 	)
 }
 
+// InSQL builds a SQLer for an IN clause or value tuple, e.g. (?, ?, ?).
+// Panics if called with zero items.
 func InSQL[T any](items ...T) SQLer {
 	if len(items) == 0 {
 		panic("InsertSQL called with zero arguments")
@@ -160,14 +176,18 @@ func InSQL[T any](items ...T) SQLer {
 	return NewQuery(fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")), values...)
 }
 
+// Scannable represents a value that can be scanned from a row.
 type Scannable interface {
 	ScanFrom(rows *sql.Rows) error
 }
 
+// ScanDB is an interface compatible with *sql.DB or *sql.Tx for queries.
 type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
+// Scan executes the query and scans rows into dest slice (value, not pointers).
+// Requires a destination type implementing Scannable.
 func Scan[T any, pT interface {
 	Scannable
 	*T
@@ -181,6 +201,8 @@ func Scan[T any, pT interface {
 	return nil
 }
 
+// ScanPtr executes the query and scans rows into dest slice of pointers.
+// Type parameter must produce something satisfying Scannable.
 func ScanPtr[T any, pT interface {
 	Scannable
 	*T
@@ -194,16 +216,14 @@ func ScanPtr[T any, pT interface {
 	return nil
 }
 
+// Iter returns a pull-based iterator (iter.Seq2) over query results for the given type.
+// Supports scanning rows into type T using pT's ScanFrom implementation.
 func Iter[T any, pT interface {
 	Scannable
 	*T
 }](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
-
-		if f := logFunc; f != nil {
-			defer f(ctx, "query", query)()
-		}
 
 		rows, err := db.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -229,12 +249,10 @@ func Iter[T any, pT interface {
 	}
 }
 
+// ScanRow executes the query and scans the first row into dest.
+// Returns sql.ErrNoRows if no result is found.
 func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
-
-	if f := logFunc; f != nil {
-		defer f(ctx, "query row", query)()
-	}
 
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -257,10 +275,6 @@ type ExecDB interface {
 
 func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
-
-	if f := logFunc; f != nil {
-		defer f(ctx, "exec", query)()
-	}
 
 	_, err := db.ExecContext(ctx, query, args...)
 	return err
@@ -336,23 +350,46 @@ func (j JSON[T]) Value() (driver.Value, error) {
 	return json.Marshal(j.Data)
 }
 
-var (
-	logFuncMu sync.Mutex
-	logFunc   func(ctx context.Context, typ string, query string) func()
-)
+type DB interface {
+	ScanDB
+	ExecDB
+	PrepareDB
+}
 
-type LogFunc func(ctx context.Context, typ string, duration time.Duration, query string)
+type HookFunc = func(ctx context.Context, typ string, query string, dur time.Duration)
 
-func SetLog(f LogFunc) {
-	logFuncMu.Lock()
-	defer logFuncMu.Unlock()
+type HookDB[D DB] struct {
+	db D
+	cb HookFunc
+}
 
-	logFunc = func(ctx context.Context, typ string, query string) func() {
-		start := time.Now()
-		return func() {
-			f(ctx, typ, time.Since(start), query)
-		}
-	}
+func NewHookDB[T DB](db T, cb HookFunc) *HookDB[T] {
+	return &HookDB[T]{db: db, cb: cb}
+}
+
+func (hd HookDB[T]) DB() T {
+	return hd.db
+}
+
+func (hd HookDB[T]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	start := time.Now()
+	r, err := hd.db.QueryContext(ctx, query, args...)
+	hd.cb(ctx, "query", query, time.Since(start))
+	return r, err
+}
+
+func (hd HookDB[T]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	start := time.Now()
+	r, err := hd.db.ExecContext(ctx, query, args...)
+	hd.cb(ctx, "exec", query, time.Since(start))
+	return r, err
+}
+
+func (hd HookDB[T]) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	start := time.Now()
+	r, err := hd.db.PrepareContext(ctx, query)
+	hd.cb(ctx, "prepare", query, time.Since(start))
+	return r, err
 }
 
 type PrepareDB interface {

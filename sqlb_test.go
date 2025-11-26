@@ -7,6 +7,7 @@ import (
 	"iter"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/carlmjohnson/be"
 	_ "github.com/ncruces/go-sqlite3/driver"
@@ -241,6 +242,49 @@ func TestExec(t *testing.T) {
 
 	err := sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(task))
 	be.NilErr(t, err)
+}
+
+func TestHook(t *testing.T) {
+	db := newDB(t)
+	ctx := t.Context()
+
+	type hookData struct {
+		typ, query string
+		dur        time.Duration
+	}
+
+	var hooks []hookData
+	ldb := sqlb.NewHookDB(db, func(ctx context.Context, typ, query string, dur time.Duration) {
+		hooks = append(hooks, hookData{typ, query, dur})
+	})
+
+	var one int
+	err := sqlb.ScanRow(ctx, ldb, sqlb.Values(&one), "select 1")
+	be.NilErr(t, err)
+	be.Equal(t, one, 1)
+
+	err = sqlb.Exec(ctx, ldb, "select 0")
+	be.NilErr(t, err)
+	be.Equal(t, one, 1)
+
+	var two int
+	err = sqlb.ScanRow(ctx, ldb, sqlb.Values(&two), "select 2")
+	be.NilErr(t, err)
+	be.Equal(t, two, 2)
+
+	be.Equal(t, len(hooks), 3)
+
+	be.Equal(t, hooks[0].typ, "query")
+	be.Equal(t, hooks[0].query, "select 1")
+	be.True(t, hooks[0].dur > 0)
+
+	be.Equal(t, hooks[1].typ, "exec")
+	be.Equal(t, hooks[1].query, "select 0")
+	be.True(t, hooks[1].dur > 0)
+
+	be.Equal(t, hooks[2].typ, "query")
+	be.Equal(t, hooks[2].query, "select 2")
+	be.True(t, hooks[2].dur > 0)
 }
 
 func TestJSON(t *testing.T) {
