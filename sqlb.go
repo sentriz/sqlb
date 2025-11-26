@@ -381,29 +381,29 @@ type HookDB[D DB] struct {
 	cb HookFunc
 }
 
-func NewHookDB[T DB](db T, cb HookFunc) *HookDB[T] {
-	return &HookDB[T]{db: db, cb: cb}
+func NewHookDB[D DB](db D, cb HookFunc) *HookDB[D] {
+	return &HookDB[D]{db: db, cb: cb}
 }
 
-func (hd HookDB[T]) DB() T {
+func (hd HookDB[D]) DB() D {
 	return hd.db
 }
 
-func (hd HookDB[T]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+func (hd HookDB[D]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	start := time.Now()
 	r, err := hd.db.QueryContext(ctx, query, args...)
 	hd.cb(ctx, "query", query, time.Since(start))
 	return r, err
 }
 
-func (hd HookDB[T]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (hd HookDB[D]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	start := time.Now()
 	r, err := hd.db.ExecContext(ctx, query, args...)
 	hd.cb(ctx, "exec", query, time.Since(start))
 	return r, err
 }
 
-func (hd HookDB[T]) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+func (hd HookDB[D]) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
 	start := time.Now()
 	r, err := hd.db.PrepareContext(ctx, query)
 	hd.cb(ctx, "prepare", query, time.Since(start))
@@ -414,20 +414,24 @@ type PrepareDB interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
 
-type StmtCache struct {
+type StmtCacheDB[D PrepareDB] struct {
 	mu    sync.RWMutex
 	cache map[string]*sql.Stmt
-	db    PrepareDB
+	db    D
 }
 
-func NewStmtCache(db PrepareDB) *StmtCache {
-	return &StmtCache{
+func (sc *StmtCacheDB[D]) DB() D {
+	return sc.db
+}
+
+func NewStmtCacheDB[D PrepareDB](db D) *StmtCacheDB[D] {
+	return &StmtCacheDB[D]{
 		cache: make(map[string]*sql.Stmt),
 		db:    db,
 	}
 }
 
-func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+func (sc *StmtCacheDB[D]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	stmt, err := sc.getStmt(ctx, query)
 	if err != nil {
 		return nil, err
@@ -435,7 +439,7 @@ func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any
 	return stmt.QueryContext(ctx, args...)
 }
 
-func (sc *StmtCache) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (sc *StmtCacheDB[D]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	stmt, err := sc.getStmt(ctx, query)
 	if err != nil {
 		return nil, err
@@ -443,7 +447,7 @@ func (sc *StmtCache) ExecContext(ctx context.Context, query string, args ...any)
 	return stmt.ExecContext(ctx, args...)
 }
 
-func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
+func (sc *StmtCacheDB[D]) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
 	sc.mu.RLock()
 	stmt, ok := sc.cache[query]
 	sc.mu.RUnlock()
@@ -469,7 +473,7 @@ func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, erro
 	return stmt, nil
 }
 
-func (sc *StmtCache) Close() error {
+func (sc *StmtCacheDB[D]) Close() error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 

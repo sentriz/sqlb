@@ -343,7 +343,7 @@ func TestStmtCache(t *testing.T) {
 	ctx := t.Context()
 
 	var prepareCalls int
-	cdb := sqlb.NewStmtCache(prepareWrap{db, func(ctx context.Context, query string) {
+	cdb := sqlb.NewStmtCacheDB(prepareWrap{db, func(ctx context.Context, query string) {
 		t.Logf("prepared %q", query)
 		prepareCalls++
 	}})
@@ -398,7 +398,7 @@ func BenchmarkStmtCache(b *testing.B) {
 	}
 	dbs := []bcase[func(tb testing.TB) sqlb.ExecDB]{
 		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(tb) }},
-		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(tb)) }},
+		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCacheDB(newDB(tb)) }},
 	}
 	queries := []bcase[sqlb.Query]{
 		{"simple", sqlb.NewQuery(`select 1 where ? and ? and ? not in (?)`, 1, 1, 0, 4)},
