@@ -1,5 +1,70 @@
-// Package sqlb provides a flexible and type-safe SQL query builder.
-// It enables building, executing, and scanning SQL queries in a composable manner.
+// Package sqlb provides lightweight, type-safe, and reflection-free helpers for database/sql.
+//
+// The core idea is that types implement [Scannable] to define how they scan themselves from rows,
+// avoiding runtime reflection. Use sqlbgen to generate these implementations.
+//
+// # Query Functions
+//
+// These functions execute queries and scan results:
+//
+//   - [ScanRow]: scan first row into dest, returns [sql.ErrNoRows] if empty
+//   - [ScanRows]: scan all rows into dest (use with [Append], [AppendPtr], [AppendValue], [Set])
+//   - [IterRows]: lazily iterate over rows
+//   - [Exec]: execute without returning rows
+//
+// # Scannable Helpers
+//
+// These return [Scannable] implementations for use with [ScanRows]:
+//
+//   - [Append]: append structs to *[]T (T must implement Scannable)
+//   - [AppendPtr]: append struct pointers to *[]*T (T must implement Scannable)
+//   - [AppendValue]: append primitive values to *[]T
+//   - [Set]: insert primitive values into map[T]struct{}
+//   - [Values]: scan columns into individual pointers
+//
+// # Code Generation
+//
+// Use sqlbgen to generate [Scannable], [Insertable], and [Updatable] implementations:
+//
+//	//go:generate go tool sqlbgen User Post Comment
+//
+// # Query Building
+//
+// [Query] provides composable query building with argument tracking:
+//
+//	var q sqlb.Query
+//	q.Append("SELECT * FROM users WHERE 1")
+//	if name != "" {
+//	    q.Append("AND name = ?", name)
+//	}
+//
+// Types implementing [SQLer] can be embedded as query arguments:
+//
+//	subquery := sqlb.NewQuery("SELECT id FROM admins WHERE level > ?", 5)
+//	q.Append("AND id IN (?)", subquery)
+//
+// # CRUD Helpers
+//
+// [InsertSQL] and [UpdateSQL] generate SQL fragments for types implementing [Insertable] or [Updatable]:
+//
+//	sqlb.ScanRow(ctx, db, &user, "INSERT INTO users ? RETURNING *", sqlb.InsertSQL(user))
+//	sqlb.ScanRow(ctx, db, &user, "UPDATE users SET ? WHERE id = ?", sqlb.UpdateSQL(user), user.ID)
+//
+// # Statement Caching
+//
+// [StmtCache] wraps a database connection to cache prepared statements:
+//
+//	cache := sqlb.NewStmtCache(db)
+//	defer cache.Close()
+//	sqlb.ScanRows(ctx, cache, sqlb.Append(&users), "SELECT * FROM users")
+//
+// # Logging
+//
+// Use [WithLogFunc] to add query logging via context:
+//
+//	ctx := sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
+//	    slog.Debug("query", "type", typ, "query", query, "dur", dur)
+//	})
 package sqlb
 
 import (
@@ -236,7 +301,15 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 	return nil
 }
 
-// IterRows returns a pull-based iterator (iter.Seq2) over query results for the given *Scannable T.
+// IterRows returns a pull-based iterator ([iter.Seq2]) over query results.
+// T must implement [Scannable] via its pointer type.
+//
+//	for user, err := range sqlb.IterRows[User](ctx, db, "SELECT * FROM users") {
+//	    if err != nil {
+//	        return err
+//	    }
+//	    fmt.Println(user.Name)
+//	}
 func IterRows[T any, pT interface {
 	Scannable
 	*T
