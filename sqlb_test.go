@@ -165,7 +165,7 @@ func TestInsertBuildMany(t *testing.T) {
 	be.DeepEqual(t, []any{"a", 0, "b", 1, "c", 2}, args)
 }
 
-func TestIter(t *testing.T) {
+func TestIterRows(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
@@ -183,7 +183,7 @@ func TestIter(t *testing.T) {
 	err = sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(tasks...))
 	be.NilErr(t, err)
 
-	next, stop := iter.Pull2(sqlb.Iter[Task](ctx, db, "select * from tasks order by age"))
+	next, stop := iter.Pull2(sqlb.IterRows[Task](ctx, db, "select * from tasks order by age"))
 	defer stop()
 
 	task, err, ok := next()
@@ -207,7 +207,7 @@ func TestIter(t *testing.T) {
 	be.Equal(t, Task{}, task)
 }
 
-func TestScan(t *testing.T) {
+func TestRowsAppend(t *testing.T) {
 	t.Parallel()
 
 	db := newDB(t)
@@ -219,7 +219,7 @@ func TestScan(t *testing.T) {
 	be.NilErr(t, err)
 
 	var out []*Task
-	err = sqlb.ScanPtr(ctx, db, &out, "select * from tasks order by id")
+	err = sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&out), "select * from tasks order by id")
 	be.NilErr(t, err)
 	be.DeepEqual(t, []*Task{
 		{ID: 1, Name: "one"},
@@ -255,26 +255,45 @@ func TestCollect(t *testing.T) {
 	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
 	be.NilErr(t, err)
 
-	t.Run("slice", func(t *testing.T) {
-		t.Parallel()
+	t.Run("Append", func(t *testing.T) {
+		var out []Task
+		err := sqlb.ScanRows(ctx, db, sqlb.Append(&out), "select * from tasks order by id")
+		be.NilErr(t, err)
+		be.DeepEqual(t, []Task{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}}, out)
+	})
 
+	t.Run("AppendPtr", func(t *testing.T) {
+		var out []*Task
+		err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&out), "select * from tasks order by id")
+		be.NilErr(t, err)
+		be.DeepEqual(t, []*Task{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}}, out)
+	})
+
+	t.Run("Values", func(t *testing.T) {
+		var id int
+		var name string
+		err := sqlb.ScanRows(ctx, db, sqlb.Values(&id, &name), "select id, name from tasks order by id limit 1")
+		be.NilErr(t, err)
+		be.Equal(t, 1, id)
+		be.Equal(t, "one", name)
+	})
+
+	t.Run("AppendValue", func(t *testing.T) {
 		var out []int
-		err := sqlb.Collect(ctx, db, sqlb.Slice(&out), "select id from tasks order by id")
+		err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&out), "select id  from tasks order by id")
 		be.NilErr(t, err)
 		be.DeepEqual(t, []int{1, 2}, out)
 	})
 
-	t.Run("set", func(t *testing.T) {
-		t.Parallel()
-
+	t.Run("Set", func(t *testing.T) {
 		var out = map[int]struct{}{}
-		err := sqlb.Collect(ctx, db, sqlb.Set(out), "select id from tasks order by id")
+		err := sqlb.ScanRows(ctx, db, sqlb.Set(out), "select id from tasks order by id")
 		be.NilErr(t, err)
 		be.DeepEqual(t, map[int]struct{}{1: {}, 2: {}}, out)
 	})
 }
 
-func TestHook(t *testing.T) {
+func TestLog(t *testing.T) {
 	db := newDB(t)
 	ctx := t.Context()
 
@@ -284,21 +303,21 @@ func TestHook(t *testing.T) {
 	}
 
 	var hooks []hookData
-	ldb := sqlb.NewHookDB(db, func(ctx context.Context, typ, query string, dur time.Duration) {
+	ctx = sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
 		hooks = append(hooks, hookData{typ, query, dur})
 	})
 
 	var one int
-	err := sqlb.ScanRow(ctx, ldb, sqlb.Values(&one), "select 1")
+	err := sqlb.ScanRow(ctx, db, sqlb.Values(&one), "select 1")
 	be.NilErr(t, err)
 	be.Equal(t, one, 1)
 
-	err = sqlb.Exec(ctx, ldb, "select 0")
+	err = sqlb.Exec(ctx, db, "select 0")
 	be.NilErr(t, err)
 	be.Equal(t, one, 1)
 
 	var two int
-	err = sqlb.ScanRow(ctx, ldb, sqlb.Values(&two), "select 2")
+	err = sqlb.ScanRow(ctx, db, sqlb.Values(&two), "select 2")
 	be.NilErr(t, err)
 	be.Equal(t, two, 2)
 
@@ -343,7 +362,7 @@ func TestStmtCache(t *testing.T) {
 	ctx := t.Context()
 
 	var prepareCalls int
-	cdb := sqlb.NewStmtCacheDB(prepareWrap{db, func(ctx context.Context, query string) {
+	cdb := sqlb.NewStmtCache(prepareWrap{db, func(ctx context.Context, query string) {
 		t.Logf("prepared %q", query)
 		prepareCalls++
 	}})
@@ -398,7 +417,7 @@ func BenchmarkStmtCache(b *testing.B) {
 	}
 	dbs := []bcase[func(tb testing.TB) sqlb.ExecDB]{
 		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(tb) }},
-		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCacheDB(newDB(tb)) }},
+		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(tb)) }},
 	}
 	queries := []bcase[sqlb.Query]{
 		{"simple", sqlb.NewQuery(`select 1 where ? and ? and ? not in (?)`, 1, 1, 0, 4)},

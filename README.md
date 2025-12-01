@@ -11,6 +11,29 @@ go get go.senan.xyz/sqlb
 go get -tool go.senan.xyz/sqlb/cmd/sqlbgen # For code gen
 ```
 
+## Overview
+
+### Query Functions
+
+| Function | Description |
+|----------|-------------|
+| `ScanRow` | Execute query and scan first row into dest |
+| `ScanRows` | Execute query and scan all rows into dest |
+| `IterRows` | Execute query and return lazy iterator over rows |
+| `Exec` | Execute query without returning rows |
+
+### Scannable Helpers
+
+For use with `ScanRow` and `ScanRows`:
+
+| Helper | Dest Type | Description |
+|--------|-----------|-------------|
+| `Append` | `*[]T` | Append structs (T must implement Scannable) |
+| `AppendPtr` | `*[]*T` | Append struct pointers (T must implement Scannable) |
+| `AppendValue` | `*[]T` | Append primitive values (int, string, etc.) |
+| `Set` | `map[T]struct{}` | Insert primitive values into set |
+| `Values` | `...any` | Scan columns into individual pointers |
+
 ## Features
 
 ### Query Building
@@ -31,7 +54,7 @@ subquery := sqlb.NewQuery("SELECT id FROM admins WHERE level > ?", 5)
 q.Append("AND id IN (?)", subquery)
 
 // Get the final SQL and args
-// Note: Scan/ScanPtr/ScanRow/Exec do this automatically
+// Note: ScanRow/ScanRows/IterRows/Exec do this automatically
 sql, args := q.SQL()
 ```
 
@@ -40,25 +63,33 @@ sql, args := q.SQL()
 ```go
 // db implements ScanDB (*sql.DB or *sql.Tx for transactions)
 
-// User implements Scannable interface with ScanFrom(rows *sql.Rows) error
-var users []User
-err := sqlb.Scan(ctx, db, &users, "SELECT * FROM users")
-
-// Scan into slice of pointers, which also implement Scannable
-var users []*User
-err := sqlb.ScanPtr(ctx, db, &users, "SELECT * FROM users")
-
-// Scan a single row
+// Scan a single row. User implements Scannable with ScanFrom(rows *sql.Rows) error
 var user User
 err := sqlb.ScanRow(ctx, db, &user, "SELECT * FROM users WHERE id = ?", 1)
 
-// Scan primitive values
+// Scan multiple rows into a slice
+var users []User
+err := sqlb.ScanRows(ctx, db, sqlb.Append(&users), "SELECT * FROM users")
+
+// Scan into slice of pointers
+var users []*User
+err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&users), "SELECT * FROM users")
+
+// Scan primitive column values into a slice
+var ids []int
+err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&ids), "SELECT id FROM users")
+
+// Scan primitive column values into a set
+var ids = map[int]struct{}{}
+err := sqlb.ScanRows(ctx, db, sqlb.Set(ids), "SELECT id FROM users")
+
+// Scan primitive values from a single row
 var name string
 var age int
 err := sqlb.ScanRow(ctx, db, sqlb.Values(&name, &age), "SELECT name, age FROM users WHERE id = ?", 1)
 
-// Iterate over results
-for user, err := range sqlb.Iter[User](ctx, db, "SELECT * FROM users") {
+// Iterate over results lazily
+for user, err := range sqlb.IterRows[User, *User](ctx, db, "SELECT * FROM users") {
     if err != nil {
         // handle error
         continue
@@ -96,7 +127,7 @@ defer stmtCache.Close()
 
 // Use the cache with any sqlb function - identical API to regular db
 var users []User
-err := sqlb.Scan(ctx, stmtCache, &users, "SELECT * FROM users WHERE age > ?", 18)
+err := sqlb.ScanRows(ctx, stmtCache, sqlb.Append(&users), "SELECT * FROM users WHERE age > ?", 18)
 
 // Statements are automatically prepared and reused
 err = sqlb.Exec(ctx, stmtCache, "INSERT INTO users (name) VALUES (?)", "Alice")
@@ -136,8 +167,9 @@ err := sqlb.ScanRow(ctx, db, &user, "UPDATE users SET ? WHERE id = ? RETURNING *
 ### Query Logging
 
 ```go
-sqlb.SetLog(func(ctx context.Context, typ string, duration time.Duration, query string) {
-    slog.DebugContext(ctx, "Query executed", "type", typ, "query", query, "took", duration) // Values not logged
+// Add logging via context
+ctx := sqlb.WithLogFunc(ctx, func(ctx context.Context, typ string, query string, dur time.Duration) {
+    slog.DebugContext(ctx, "Query executed", "type", typ, "query", query, "took", dur)
 })
 ```
 

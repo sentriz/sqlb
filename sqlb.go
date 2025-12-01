@@ -88,6 +88,10 @@ func (q Query) SQL() (string, []any) {
 	return query.String(), args
 }
 
+type SQLer interface {
+	SQL() (string, []any)
+}
+
 // Updatable represents a struct that can produce its primary key and values for updates.
 type Updatable interface {
 	PrimaryKey() string
@@ -186,44 +190,63 @@ type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// Scan executes the query and scans rows into dest slice (value, not pointers).
-// Requires a destination type implementing Scannable.
-func Scan[T any, pT interface {
-	Scannable
-	*T
-}](ctx context.Context, db ScanDB, dest *[]T, query string, args ...any) error {
-	for t, err := range Iter[T, pT](ctx, db, query, args...) {
-		if err != nil {
-			return err
-		}
-		*dest = append(*dest, t)
+// ScanRow executes the query and scans the first row into dest.
+// Returns sql.ErrNoRows if no result is found.
+func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+
+	if lf := logFunc(ctx); lf != nil {
+		defer log(ctx, lf, "query", query)()
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return sql.ErrNoRows
+	}
+	if err := dest.ScanFrom(rows); err != nil {
+		return err
 	}
 	return nil
 }
 
-// ScanPtr executes the query and scans rows into dest slice of pointers.
-// Type parameter must produce something satisfying Scannable.
-func ScanPtr[T any, pT interface {
-	Scannable
-	*T
-}](ctx context.Context, db ScanDB, dest *[]*T, query string, args ...any) error {
-	for t, err := range Iter[T, pT](ctx, db, query, args...) {
-		if err != nil {
+// ScanRows executes the query and scans all rows into the single dest. To be used with [Append], [AppendPtr], [AppendValue], [Set], or [Values].
+func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
+	query, args = NewQuery(query, args...).SQL()
+
+	if lf := logFunc(ctx); lf != nil {
+		defer log(ctx, lf, "query", query)()
+	}
+
+	rows, err := db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		if err := dest.ScanFrom(rows); err != nil {
 			return err
 		}
-		*dest = append(*dest, &t)
 	}
 	return nil
 }
 
-// Iter returns a pull-based iterator (iter.Seq2) over query results for the given type.
-// Supports scanning rows into type T using pT's ScanFrom implementation.
-func Iter[T any, pT interface {
+// IterRows returns a pull-based iterator (iter.Seq2) over query results for the given *Scannable T.
+func IterRows[T any, pT interface {
 	Scannable
 	*T
 }](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
+
+		if lf := logFunc(ctx); lf != nil {
+			defer log(ctx, lf, "query", query)()
+		}
 
 		rows, err := db.QueryContext(ctx, query, args...)
 		if err != nil {
@@ -249,44 +272,6 @@ func Iter[T any, pT interface {
 	}
 }
 
-// ScanRow executes the query and scans the first row into dest.
-// Returns sql.ErrNoRows if no result is found.
-func ScanRow[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
-	query, args = NewQuery(query, args...).SQL()
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		return sql.ErrNoRows
-	}
-	if err := dest.ScanFrom(rows); err != nil {
-		return err
-	}
-	return nil
-}
-
-// Collect executes the query and scans all rows into the single dest. To be used for example with [Slice] or [Set],
-func Collect[pT Scannable](ctx context.Context, db ScanDB, dest pT, query string, args ...any) error {
-	query, args = NewQuery(query, args...).SQL()
-
-	rows, err := db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		if err := dest.ScanFrom(rows); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 type ExecDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -294,14 +279,74 @@ type ExecDB interface {
 func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
+	if lf := logFunc(ctx); lf != nil {
+		defer log(ctx, lf, "exec", query)()
+	}
+
 	_, err := db.ExecContext(ctx, query, args...)
 	return err
 }
 
-type SQLer interface {
-	SQL() (string, []any)
+// Append returns a [Scannable] that appends each row to dest.
+// T must implement [Scannable].
+//
+//	var dest []Job
+//	sqlb.ScanRows(ctx, db, Append(&dest), ...)
+func Append[T any, pT interface {
+	Scannable
+	*T
+}](dest *[]T) Scannable {
+	return scanAppend[T, pT]{dest}
 }
 
+type scanAppend[T any, pT interface {
+	Scannable
+	*T
+}] struct {
+	s *[]T
+}
+
+func (p scanAppend[T, pT]) ScanFrom(rows *sql.Rows) error {
+	var t T
+	if err := pT(&t).ScanFrom(rows); err != nil {
+		return err
+	}
+	*p.s = append(*p.s, t)
+	return nil
+}
+
+// AppendPtr returns a [Scannable] that appends a pointer to each row to dest.
+// T must implement [Scannable].
+//
+//	var dest []*Job
+//	sqlb.ScanRows(ctx, db, AppendPtr(&dest), ...)
+func AppendPtr[T any, pT interface {
+	Scannable
+	*T
+}](dest *[]*T) Scannable {
+	return scanAppendPtr[T, pT]{dest}
+}
+
+type scanAppendPtr[T any, pT interface {
+	Scannable
+	*T
+}] struct {
+	s *[]*T
+}
+
+func (p scanAppendPtr[T, pT]) ScanFrom(rows *sql.Rows) error {
+	var t T
+	if err := pT(&t).ScanFrom(rows); err != nil {
+		return err
+	}
+	*p.s = append(*p.s, &t)
+	return nil
+}
+
+// Values returns a [Scannable] that scans columns into the provided pointers.
+//
+//	var a, b int
+//	sqlb.ScanRow(ctx, db, Values(&a, &b), ...)
 func Values(dests ...any) Scannable {
 	return scanValues(dests)
 }
@@ -312,13 +357,18 @@ func (p scanValues) ScanFrom(rows *sql.Rows) error {
 	return rows.Scan(p...)
 }
 
-func Slice[T any](s *[]T) Scannable {
-	return (*scanSlice[T])(s)
+// AppendValue returns a [Scannable] that appends a single column value to dest.
+// For use with primitive types like int, string, etc.
+//
+//	var dest []int
+//	sqlb.ScanRows(ctx, db, AppendValue(&dest), ...)
+func AppendValue[T any](s *[]T) Scannable {
+	return (*scanAppendValue[T])(s)
 }
 
-type scanSlice[T any] []T
+type scanAppendValue[T any] []T
 
-func (p *scanSlice[T]) ScanFrom(rows *sql.Rows) error {
+func (p *scanAppendValue[T]) ScanFrom(rows *sql.Rows) error {
 	var v T
 	if err := rows.Scan(&v); err != nil {
 		return err
@@ -327,6 +377,11 @@ func (p *scanSlice[T]) ScanFrom(rows *sql.Rows) error {
 	return nil
 }
 
+// Set returns a [Scannable] that inserts a single column value into the map[T]struct{}.
+// For use with comparable primitive types like int, string, etc.
+//
+//	var dest = map[string]struct{}{}
+//	sqlb.ScanRows(ctx, db, Set(dest), ...)
 func Set[T comparable](s map[T]struct{}) Scannable {
 	return (scanSet[T])(s)
 }
@@ -341,6 +396,8 @@ func (p scanSet[T]) ScanFrom(rows *sql.Rows) error {
 	p[v] = struct{}{}
 	return nil
 }
+
+// JSON functionality
 
 type JSON[T any] struct {
 	Data T
@@ -368,70 +425,44 @@ func (j JSON[T]) Value() (driver.Value, error) {
 	return json.Marshal(j.Data)
 }
 
-type DB interface {
-	ScanDB
-	ExecDB
-	PrepareDB
+type LogFunc = func(ctx context.Context, typ string, query string, dur time.Duration)
+
+type logFuncContextKey struct{}
+
+func WithLogFunc(ctx context.Context, lf LogFunc) context.Context {
+	return context.WithValue(ctx, logFuncContextKey{}, lf)
 }
 
-type HookFunc = func(ctx context.Context, typ string, query string, dur time.Duration)
-
-type HookDB[D DB] struct {
-	db D
-	cb HookFunc
+func logFunc(ctx context.Context) LogFunc {
+	f, _ := ctx.Value(logFuncContextKey{}).(LogFunc)
+	return f
 }
 
-func NewHookDB[D DB](db D, cb HookFunc) *HookDB[D] {
-	return &HookDB[D]{db: db, cb: cb}
-}
-
-func (hd HookDB[D]) DB() D {
-	return hd.db
-}
-
-func (hd HookDB[D]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+func log(ctx context.Context, lf LogFunc, typ string, query string) func() {
 	start := time.Now()
-	r, err := hd.db.QueryContext(ctx, query, args...)
-	hd.cb(ctx, "query", query, time.Since(start))
-	return r, err
-}
-
-func (hd HookDB[D]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	start := time.Now()
-	r, err := hd.db.ExecContext(ctx, query, args...)
-	hd.cb(ctx, "exec", query, time.Since(start))
-	return r, err
-}
-
-func (hd HookDB[D]) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
-	start := time.Now()
-	r, err := hd.db.PrepareContext(ctx, query)
-	hd.cb(ctx, "prepare", query, time.Since(start))
-	return r, err
+	return func() {
+		lf(ctx, typ, query, time.Since(start))
+	}
 }
 
 type PrepareDB interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
 
-type StmtCacheDB[D PrepareDB] struct {
+type StmtCache struct {
 	mu    sync.RWMutex
 	cache map[string]*sql.Stmt
-	db    D
+	db    PrepareDB
 }
 
-func (sc *StmtCacheDB[D]) DB() D {
-	return sc.db
-}
-
-func NewStmtCacheDB[D PrepareDB](db D) *StmtCacheDB[D] {
-	return &StmtCacheDB[D]{
+func NewStmtCache[D PrepareDB](db D) *StmtCache {
+	return &StmtCache{
 		cache: make(map[string]*sql.Stmt),
 		db:    db,
 	}
 }
 
-func (sc *StmtCacheDB[D]) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
 	stmt, err := sc.getStmt(ctx, query)
 	if err != nil {
 		return nil, err
@@ -439,7 +470,7 @@ func (sc *StmtCacheDB[D]) QueryContext(ctx context.Context, query string, args .
 	return stmt.QueryContext(ctx, args...)
 }
 
-func (sc *StmtCacheDB[D]) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+func (sc *StmtCache) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	stmt, err := sc.getStmt(ctx, query)
 	if err != nil {
 		return nil, err
@@ -447,7 +478,7 @@ func (sc *StmtCacheDB[D]) ExecContext(ctx context.Context, query string, args ..
 	return stmt.ExecContext(ctx, args...)
 }
 
-func (sc *StmtCacheDB[D]) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
+func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
 	sc.mu.RLock()
 	stmt, ok := sc.cache[query]
 	sc.mu.RUnlock()
@@ -473,7 +504,7 @@ func (sc *StmtCacheDB[D]) getStmt(ctx context.Context, query string) (*sql.Stmt,
 	return stmt, nil
 }
 
-func (sc *StmtCacheDB[D]) Close() error {
+func (sc *StmtCache) Close() error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 

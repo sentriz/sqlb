@@ -127,7 +127,7 @@ func main() {
 		fmt.Fprintf(destf, "\tdests := make([]any, 0, len(columns))\n")
 		fmt.Fprintf(destf, "\tfor _, c := range columns {\n")
 		fmt.Fprintf(destf, "\t\tswitch c {\n")
-		
+
 		for _, f := range fields {
 			fmt.Fprintf(destf, "\t\tcase \"%s\":\n", toSnake(f))
 			fmt.Fprintf(destf, "\t\t\tdests = append(dests, &%s.%s)\n", firstChar, f)
