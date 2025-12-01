@@ -535,7 +535,7 @@ type StmtCache struct {
 }
 
 // NewStmtCache creates a new statement cache wrapping the provided database connection.
-func NewStmtCache[D PrepareDB](db D) *StmtCache {
+func NewStmtCache(db PrepareDB) *StmtCache {
 	return &StmtCache{
 		cache: make(map[string]*sql.Stmt),
 		db:    db,
