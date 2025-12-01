@@ -7,20 +7,20 @@
 //
 // These functions execute queries and scan results:
 //
-//   - [ScanRow]: scan first row into dest, returns [sql.ErrNoRows] if empty
+//   - [ScanRow]: scan first row into dest, returns [sql.ErrNoRows] if empty (scan straight into a [Scannable] type, or use [Values])
 //   - [ScanRows]: scan all rows into dest (use with [Append], [AppendPtr], [AppendValue], [Set])
 //   - [IterRows]: lazily iterate over rows
 //   - [Exec]: execute without returning rows
 //
 // # Scannable Helpers
 //
-// These return [Scannable] implementations for use with [ScanRows]:
+// These return [Scannable] implementations which can be used with [ScanRow] and [ScanRows]. Though practically, for [ScanRow], only [Values] is helpful.
 //
 //   - [Append]: append structs to *[]T (T must implement Scannable)
 //   - [AppendPtr]: append struct pointers to *[]*T (T must implement Scannable)
 //   - [AppendValue]: append primitive values to *[]T
 //   - [Set]: insert primitive values into map[T]struct{}
-//   - [Values]: scan columns into individual pointers
+//   - [Values]: scan columns into individual pointers, for use with primitive types like string, int, etc
 //
 // # Code Generation
 //
