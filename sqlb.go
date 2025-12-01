@@ -1,4 +1,4 @@
-// Package sqlb provides lightweight, type-safe, and reflection-free helpers for database/sql.
+// Package sqlb provides lightweight, type-safe, and reflection-free helpers for [database/sql].
 //
 // The core idea is that types implement [Scannable] to define how they scan themselves from rows,
 // avoiding runtime reflection. Use sqlbgen to generate these implementations.
@@ -14,13 +14,13 @@
 //
 // # Scannable Helpers
 //
-// These return [Scannable] implementations which can be used with [ScanRow] and [ScanRows]. Though practically, for [ScanRow], only [Values] is helpful.
+// These return [Scannable] implementations for use with [ScanRow] and [ScanRows] (though practically, for [ScanRow], only [Values] is useful):
 //
-//   - [Append]: append structs to *[]T (T must implement Scannable)
-//   - [AppendPtr]: append struct pointers to *[]*T (T must implement Scannable)
+//   - [Append]: append structs to *[]T (T must implement [Scannable])
+//   - [AppendPtr]: append struct pointers to *[]*T (T must implement [Scannable])
 //   - [AppendValue]: append primitive values to *[]T
 //   - [Set]: insert primitive values into map[T]struct{}
-//   - [Values]: scan columns into individual pointers, for use with primitive types like string, int, etc
+//   - [Values]: scan columns into individual pointers, for use with primitive types like string, int, etc.
 //
 // # Code Generation
 //
@@ -113,7 +113,7 @@ func (q *Query) Append(query string, args ...any) {
 }
 
 // SQL returns the composed SQL string and flattened argument slice.
-// If any argument implements SQLer, they are expanded recursively in-place.
+// If any argument implements [SQLer], they are expanded recursively in-place.
 func (q Query) SQL() (string, []any) {
 	// fast path
 	var hasSQLer bool
@@ -153,6 +153,7 @@ func (q Query) SQL() (string, []any) {
 	return query.String(), args
 }
 
+// SQLer is implemented by types that can be embedded as query arguments.
 type SQLer interface {
 	SQL() (string, []any)
 }
@@ -230,7 +231,7 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 // Panics if called with zero items.
 func InSQL[T any](items ...T) SQLer {
 	if len(items) == 0 {
-		panic("InsertSQL called with zero arguments")
+		panic("InSQL called with zero arguments")
 	}
 
 	placeholders := make([]string, len(items))
@@ -256,7 +257,7 @@ type ScanDB interface {
 }
 
 // ScanRow executes the query and scans the first row into dest.
-// Returns sql.ErrNoRows if no result is found.
+// Returns [sql.ErrNoRows] if no result is found.
 func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
@@ -345,10 +346,12 @@ func IterRows[T any, pT interface {
 	}
 }
 
+// ExecDB is an interface compatible with *sql.DB or *sql.Tx for executing queries.
 type ExecDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
+// Exec executes a query without returning any rows.
 func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
@@ -470,8 +473,7 @@ func (p scanSet[T]) ScanFrom(rows *sql.Rows) error {
 	return nil
 }
 
-// JSON functionality
-
+// JSON is a wrapper type for JSON-encoded database columns.
 type JSON[T any] struct {
 	Data T
 }
@@ -498,10 +500,12 @@ func (j JSON[T]) Value() (driver.Value, error) {
 	return json.Marshal(j.Data)
 }
 
+// LogFunc is a callback for logging query execution.
 type LogFunc = func(ctx context.Context, typ string, query string, dur time.Duration)
 
 type logFuncContextKey struct{}
 
+// WithLogFunc returns a context that will log queries using the provided function.
 func WithLogFunc(ctx context.Context, lf LogFunc) context.Context {
 	return context.WithValue(ctx, logFuncContextKey{}, lf)
 }
@@ -518,16 +522,19 @@ func log(ctx context.Context, lf LogFunc, typ string, query string) func() {
 	}
 }
 
+// PrepareDB is an interface compatible with *sql.DB or *sql.Tx for preparing statements.
 type PrepareDB interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
 
+// StmtCache wraps a database connection to cache prepared statements.
 type StmtCache struct {
 	mu    sync.RWMutex
 	cache map[string]*sql.Stmt
 	db    PrepareDB
 }
 
+// NewStmtCache creates a new statement cache wrapping the provided database connection.
 func NewStmtCache[D PrepareDB](db D) *StmtCache {
 	return &StmtCache{
 		cache: make(map[string]*sql.Stmt),
