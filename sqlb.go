@@ -63,7 +63,7 @@
 // Use [WithLogFunc] to add query logging via context:
 //
 //	ctx := sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
-//	    slog.Debug("query", "type", typ, "query", query, "dur", dur)
+//	    slog.DebugContext(ctx, "query", "type", typ, "query", query, "dur", dur)
 //	})
 package sqlb
 
