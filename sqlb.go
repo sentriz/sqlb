@@ -8,7 +8,7 @@
 // These functions execute queries and scan results:
 //
 //   - [ScanRow]: scan first row into dest, returns [sql.ErrNoRows] if empty (scan straight into a [Scannable] type, or use [Values])
-//   - [ScanRows]: scan all rows into dest (use with [Append], [AppendPtr], [AppendValue], [Set])
+//   - [ScanRows]: scan all rows into dest (use with [Append], [AppendPtr], [AppendValue], [SetValue])
 //   - [IterRows]: lazily iterate over rows
 //   - [Exec]: execute without returning rows
 //
@@ -16,11 +16,11 @@
 //
 // These return [Scannable] implementations for use with [ScanRow] and [ScanRows] (though practically, for [ScanRow], only [Values] is useful):
 //
-//   - [Append]: append structs to *[]T (T must implement [Scannable])
-//   - [AppendPtr]: append struct pointers to *[]*T (T must implement [Scannable])
-//   - [AppendValue]: append primitive values to *[]T
-//   - [Set]: insert primitive values into map[T]struct{}
-//   - [Values]: scan columns into individual pointers, for use with primitive types like string, int, etc.
+//   - [Append]: append rows to *[]T (T must implement [Scannable])
+//   - [AppendPtr]: append row pointers to *[]*T (T must implement [Scannable])
+//   - [AppendValue]: append single column values to *[]T (for primitive types)
+//   - [SetValue]: insert single column values into map[T]struct{} (for primitive types)
+//   - [Values]: scan columns into pointers (for primitive types)
 //
 // # Code Generation
 //
@@ -280,7 +280,7 @@ func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args 
 	return nil
 }
 
-// ScanRows executes the query and scans all rows into the single dest. To be used with [Append], [AppendPtr], [AppendValue], [Set], or [Values].
+// ScanRows executes the query and scans all rows into the single dest. To be used with [Append], [AppendPtr], [AppendValue], [SetValue], or [Values].
 func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
@@ -363,7 +363,7 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	return err
 }
 
-// Append returns a [Scannable] that appends each row to dest.
+// Append returns a [Scannable] that appends rows to dest.
 // T must implement [Scannable].
 //
 //	var dest []Job
@@ -391,7 +391,7 @@ func (p scanAppend[T, pT]) ScanFrom(rows *sql.Rows) error {
 	return nil
 }
 
-// AppendPtr returns a [Scannable] that appends a pointer to each row to dest.
+// AppendPtr returns a [Scannable] that appends row pointers to dest.
 // T must implement [Scannable].
 //
 //	var dest []*Job
@@ -420,6 +420,7 @@ func (p scanAppendPtr[T, pT]) ScanFrom(rows *sql.Rows) error {
 }
 
 // Values returns a [Scannable] that scans columns into the provided pointers.
+// For use with primitive types.
 //
 //	var a, b int
 //	sqlb.ScanRow(ctx, db, Values(&a, &b), ...)
@@ -434,7 +435,7 @@ func (p scanValues) ScanFrom(rows *sql.Rows) error {
 }
 
 // AppendValue returns a [Scannable] that appends a single column value to dest.
-// For use with primitive types like int, string, etc.
+// For use with primitive types.
 //
 //	var dest []int
 //	sqlb.ScanRows(ctx, db, AppendValue(&dest), ...)
@@ -453,12 +454,12 @@ func (p *scanAppendValue[T]) ScanFrom(rows *sql.Rows) error {
 	return nil
 }
 
-// Set returns a [Scannable] that inserts a single column value into the map[T]struct{}.
-// For use with comparable primitive types like int, string, etc.
+// SetValue returns a [Scannable] that inserts a single column value into dest.
+// For use with primitive types.
 //
 //	var dest = map[string]struct{}{}
-//	sqlb.ScanRows(ctx, db, Set(dest), ...)
-func Set[T comparable](s map[T]struct{}) Scannable {
+//	sqlb.ScanRows(ctx, db, SetValue(dest), ...)
+func SetValue[T comparable](s map[T]struct{}) Scannable {
 	return (scanSet[T])(s)
 }
 

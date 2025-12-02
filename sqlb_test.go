@@ -285,9 +285,9 @@ func TestCollect(t *testing.T) {
 		be.DeepEqual(t, []int{1, 2}, out)
 	})
 
-	t.Run("Set", func(t *testing.T) {
+	t.Run("SetValue", func(t *testing.T) {
 		var out = map[int]struct{}{}
-		err := sqlb.ScanRows(ctx, db, sqlb.Set(out), "select id from tasks order by id")
+		err := sqlb.ScanRows(ctx, db, sqlb.SetValue(out), "select id from tasks order by id")
 		be.NilErr(t, err)
 		be.DeepEqual(t, map[int]struct{}{1: {}, 2: {}}, out)
 	})
