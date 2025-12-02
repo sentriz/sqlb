@@ -1,6 +1,6 @@
 # sqlb
 
-lightweight, type-safe, and reflection-free helpers for `database/sql`.
+Lightweight, type-safe, and reflection-free helpers for `database/sql`.
 
 [![go reference](https://pkg.go.dev/badge/go.senan.xyz/sqlb.svg)](https://pkg.go.dev/go.senan.xyz/sqlb)
 
