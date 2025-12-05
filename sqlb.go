@@ -251,6 +251,14 @@ type Scannable interface {
 	ScanFrom(rows *sql.Rows) error
 }
 
+// ScannablePtr is a constraint for pointer types that implement [Scannable].
+// It allows sqlb to allocate a new T and scan it's *T.
+// It should not be used directly, since Go will infer it from the first type argument in [IterRows], [AppendPtr] and [Append].
+type ScannablePtr[T any] interface {
+	Scannable
+	*T
+}
+
 // ScanDB is an interface compatible with *sql.DB or *sql.Tx for queries.
 type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -311,10 +319,7 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 //	    }
 //	    fmt.Println(user.Name)
 //	}
-func IterRows[T any, pT interface {
-	Scannable
-	*T
-}](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
+func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
@@ -368,17 +373,11 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 //
 //	var dest []Job
 //	sqlb.ScanRows(ctx, db, Append(&dest), ...)
-func Append[T any, pT interface {
-	Scannable
-	*T
-}](dest *[]T) Scannable {
+func Append[T any, pT ScannablePtr[T]](dest *[]T) Scannable {
 	return scanAppend[T, pT]{dest}
 }
 
-type scanAppend[T any, pT interface {
-	Scannable
-	*T
-}] struct {
+type scanAppend[T any, pT ScannablePtr[T]] struct {
 	s *[]T
 }
 
@@ -396,17 +395,11 @@ func (p scanAppend[T, pT]) ScanFrom(rows *sql.Rows) error {
 //
 //	var dest []*Job
 //	sqlb.ScanRows(ctx, db, AppendPtr(&dest), ...)
-func AppendPtr[T any, pT interface {
-	Scannable
-	*T
-}](dest *[]*T) Scannable {
+func AppendPtr[T any, pT ScannablePtr[T]](dest *[]*T) Scannable {
 	return scanAppendPtr[T, pT]{dest}
 }
 
-type scanAppendPtr[T any, pT interface {
-	Scannable
-	*T
-}] struct {
+type scanAppendPtr[T any, pT ScannablePtr[T]] struct {
 	s *[]*T
 }
 
