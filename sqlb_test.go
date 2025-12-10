@@ -4,35 +4,43 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"iter"
-	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/carlmjohnson/be"
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
 	"go.senan.xyz/sqlb"
 )
 
-func TestBuild(t *testing.T) {
-	t.Parallel()
+func ExampleQuery() {
+	var q sqlb.Query
+	q.Append("SELECT * FROM users WHERE 1")
+	q.Append("AND name = ?", "alice")
+	q.Append("AND age > ?", 18)
 
-	var b sqlb.Query
-	b.Append("select * from tasks")
-	b.Append("where 1")
-	b.Append("and one=?", 1)
-	b.Append("and two=?", 2)
-	b.Append("returning *")
-
-	query, args := b.SQL()
-	be.Equal(t, "select * from tasks where 1 and one=? and two=? returning *", query)
-	be.DeepEqual(t, []any{1, 2}, args)
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM users WHERE 1 AND name = ? AND age > ?
+	// [alice 18]
 }
 
-func TestBuildSubquery(t *testing.T) {
-	t.Parallel()
+func ExampleQuery_subquery() {
+	subquery := sqlb.NewQuery("SELECT id FROM admins WHERE level > ?", 5)
 
+	var q sqlb.Query
+	q.Append("SELECT * FROM users WHERE id IN (?)", subquery)
+
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM users WHERE id IN (SELECT id FROM admins WHERE level > ?)
+	// [5]
+}
+
+func ExampleQuery_nested() {
 	var whereA sqlb.Query
 	whereA.Append("three=?", 3)
 
@@ -45,29 +53,35 @@ func TestBuildSubquery(t *testing.T) {
 
 	var b sqlb.Query
 	b.Append("select * from (?) union (?)",
-		sqlb.NewQuery("select * from tasks where a=?",
-			"a",
-		),
-		sqlb.NewQuery("select * from tasks where a=? and ?",
-			"aa",
-			sqlb.NewQuery("xx=?", 10),
-		),
+		sqlb.NewQuery("select * from tasks where a=?", "a"),
+		sqlb.NewQuery("select * from tasks where a=? and ?", "aa", sqlb.NewQuery("xx=?", 10)),
 	)
 	b.Append("where ?", where)
 
 	query, args := b.SQL()
-	be.Equal(t, "select * from (select * from tasks where a=?) union (select * from tasks where a=? and xx=?) where three=? or four=?", query)
-	be.DeepEqual(t, []any{"a", "aa", 10, 3, 4}, args)
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// select * from (select * from tasks where a=?) union (select * from tasks where a=? and xx=?) where three=? or four=?
+	// [a aa 10 3 4]
 }
 
-func TestBuildPanic(t *testing.T) {
+func ExampleNewQuery() {
+	q := sqlb.NewQuery("SELECT * FROM users WHERE name = ?", "bob")
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM users WHERE name = ?
+	// [bob]
+}
+
+func TestQueryPanic(t *testing.T) {
 	t.Parallel()
 
-	expPanic := "want 3 args, got 2"
-
 	defer func() {
-		if r := recover(); r != expPanic {
-			t.Errorf("exp panic %q got %q", expPanic, r)
+		if r := recover(); r != "want 3 args, got 2" {
+			t.Errorf("unexpected panic: %v", r)
 		}
 	}()
 
@@ -75,227 +89,389 @@ func TestBuildPanic(t *testing.T) {
 	b.Append("one=?, two=?, three=?", 1, 2)
 }
 
-func TestInSQL(t *testing.T) {
-	query, args := sqlb.InSQL("one", "two", "three").SQL()
-	be.Equal(t, "(?, ?, ?)", query)
-	be.DeepEqual(t, []any{"one", "two", "three"}, args)
+func ExampleUpdateSQL() {
+	task := Task{ID: 1, Name: "alice", Age: 31}
+
+	q := sqlb.NewQuery("UPDATE tasks SET ? WHERE id = ?", sqlb.UpdateSQL(task), task.ID)
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// UPDATE tasks SET name=? , age=? WHERE id = ?
+	// [alice 31 1]
 }
 
-func TestInsert(t *testing.T) {
-	db := newDB(t)
-	ctx := t.Context()
+func ExampleInsertSQL() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
 
-	task := Task{Name: "the name", Age: 32}
-	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
-	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 32}, task)
+	task := Task{Name: "alice", Age: 30}
+	err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(task.ID, task.Name, task.Age)
+	// Output:
+	// 1 alice 30
 }
 
-func TestInsertUpdate(t *testing.T) {
-	db := newDB(t)
-	ctx := t.Context()
+func ExampleInsertSQL_many() {
+	tasks := []Task{
+		{Name: "alice", Age: 30},
+		{Name: "bob", Age: 25},
+	}
 
-	task := Task{Name: "name", Age: 100}
-
-	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks ? returning *", sqlb.InsertSQL(task))
-	be.NilErr(t, err)
-	be.Nonzero(t, task.ID)
-
-	task.Age = 101
-	err = sqlb.ScanRow(ctx, db, &task, "update tasks set ? returning *", sqlb.UpdateSQL(task))
-	be.NilErr(t, err)
-
-	var readTask Task
-	err = sqlb.ScanRow(ctx, db, &readTask, "select * from tasks where id = ?", task.ID)
-	be.NilErr(t, err)
-	be.Equal(t, 101, readTask.Age)
-	be.DeepEqual(t, task, readTask)
+	q := sqlb.NewQuery("INSERT INTO tasks ?", sqlb.InsertSQL(tasks...))
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// INSERT INTO tasks (name, age) VALUES (?, ?), (?, ?)
+	// [alice 30 bob 25]
 }
 
-func TestUpdate(t *testing.T) {
+func TestInsertSQLPanic(t *testing.T) {
 	t.Parallel()
 
-	db := newDB(t)
-	ctx := t.Context()
+	defer func() {
+		if r := recover(); r != "InsertSQL called with zero arguments" {
+			t.Errorf("unexpected panic: %v", r)
+		}
+	}()
+
+	sqlb.InsertSQL[Task]()
+}
+
+func ExampleInSQL() {
+	ids := []int{1, 2, 3}
+
+	var q sqlb.Query
+	q.Append("SELECT * FROM users WHERE id IN ?", sqlb.InSQL(ids...))
+
+	query, args := q.SQL()
+	fmt.Println(query)
+	fmt.Println(args)
+	// Output:
+	// SELECT * FROM users WHERE id IN (?, ?, ?)
+	// [1 2 3]
+}
+
+func TestInSQLPanic(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if r := recover(); r != "InSQL called with zero arguments" {
+			t.Errorf("unexpected panic: %v", r)
+		}
+	}()
+
+	sqlb.InSQL[int]()
+}
+
+func ExampleScanRow() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "alice", Age: 30}))
 
 	var task Task
-	err := sqlb.ScanRow(ctx, db, &task, "insert into tasks (name) values (?) returning *", "the name")
-	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 0}, task)
-
-	task.Age = 69
-
-	build := sqlb.NewQuery("update tasks set ? where id=? returning *", sqlb.UpdateSQL(task), task.ID)
-	query, args := build.SQL()
-
-	be.Equal(t, "update tasks set name=? , age=? where id=? returning *", query)
-	be.DeepEqual(t, []any{"the name", 69, 1}, args)
-
-	query, values := build.SQL()
-	err = sqlb.ScanRow(ctx, db, &task, query, values...)
-	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 1, Name: "the name", Age: 69}, task)
-}
-
-func TestInsertBuild(t *testing.T) {
-	t.Parallel()
-
-	task := Task{Name: "the name", Age: 32}
-
-	build := sqlb.NewQuery("insert into tasks ?", sqlb.InsertSQL(task))
-	query, args := build.SQL()
-
-	be.Equal(t, "insert into tasks (name, age) VALUES (?, ?)", query)
-	be.DeepEqual(t, []any{"the name", 32}, args)
-}
-
-func TestInsertBuildMany(t *testing.T) {
-	t.Parallel()
-
-	tasks := []Task{
-		{Name: "a"},
-		{Name: "b", Age: 1},
-		{Name: "c", Age: 2},
+	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice")
+	if err != nil {
+		panic(err)
 	}
-
-	build := sqlb.NewQuery("insert into tasks ?", sqlb.InsertSQL(tasks...))
-	query, args := build.SQL()
-
-	be.Equal(t, "insert into tasks (name, age) VALUES (?, ?), (?, ?), (?, ?)", query)
-	be.DeepEqual(t, []any{"a", 0, "b", 1, "c", 2}, args)
+	fmt.Println(task.Name, task.Age)
+	// Output:
+	// alice 30
 }
 
-func TestIterRows(t *testing.T) {
-	t.Parallel()
-
-	db := newDB(t)
+func TestScanRowNoRows(t *testing.T) {
 	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
-	tasks := []Task{
-		{Name: "a", Age: 1},
-		{Name: "b", Age: 2},
-		{Name: "c", Age: 3},
+	var task Task
+	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE id = ?", 999)
+	if err != sql.ErrNoRows {
+		t.Errorf("got %v, want sql.ErrNoRows", err)
 	}
-
-	err := sqlb.Exec(ctx, db, "delete from tasks")
-	be.NilErr(t, err)
-
-	err = sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(tasks...))
-	be.NilErr(t, err)
-
-	next, stop := iter.Pull2(sqlb.IterRows[Task](ctx, db, "select * from tasks order by age"))
-	defer stop()
-
-	task, err, ok := next()
-	be.True(t, ok)
-	be.NilErr(t, err)
-	be.Equal(t, "a", task.Name)
-
-	task, err, ok = next()
-	be.True(t, ok)
-	be.NilErr(t, err)
-	be.Equal(t, "b", task.Name)
-
-	task, err, ok = next()
-	be.True(t, ok)
-	be.NilErr(t, err)
-	be.Equal(t, "c", task.Name)
-
-	task, err, ok = next()
-	be.False(t, ok)
-	be.NilErr(t, err)
-	be.Equal(t, Task{}, task)
 }
 
-func TestRowsAppend(t *testing.T) {
-	t.Parallel()
-
-	db := newDB(t)
+func TestScanRowQueryError(t *testing.T) {
 	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
-	_, err := db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
-	be.NilErr(t, err)
-	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
-	be.NilErr(t, err)
-
-	var out []*Task
-	err = sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&out), "select * from tasks order by id")
-	be.NilErr(t, err)
-	be.DeepEqual(t, []*Task{
-		{ID: 1, Name: "one"},
-		{ID: 2, Name: "two"},
-	}, out)
-
-	var two Task
-	err = sqlb.ScanRow(ctx, db, &two, "select * from tasks where id=?", 2)
-	be.NilErr(t, err)
-	be.DeepEqual(t, Task{ID: 2, Name: "two"}, two)
+	var task Task
+	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM nonexistent")
+	if err == nil {
+		t.Error("expected error for invalid table")
+	}
 }
 
-func TestExec(t *testing.T) {
-	t.Parallel()
+func ExampleScanRows() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
 
-	db := newDB(t)
-	ctx := t.Context()
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(
+		Task{Name: "alice", Age: 30},
+		Task{Name: "bob", Age: 25},
+		Task{Name: "carol", Age: 35},
+	))
 
-	task := Task{Name: "eg"}
-
-	err := sqlb.Exec(ctx, db, "insert into tasks ?", sqlb.InsertSQL(task))
-	be.NilErr(t, err)
+	var tasks []Task
+	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name")
+	if err != nil {
+		panic(err)
+	}
+	for _, t := range tasks {
+		fmt.Println(t.Name, t.Age)
+	}
+	// Output:
+	// alice 30
+	// bob 25
+	// carol 35
 }
 
-func TestCollect(t *testing.T) {
-	t.Parallel()
-
-	db := newDB(t)
+func TestScanRowsQueryError(t *testing.T) {
 	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
-	_, err := db.ExecContext(ctx, `insert into tasks (name) values (?)`, "one")
-	be.NilErr(t, err)
-	_, err = db.ExecContext(ctx, `insert into tasks (name) values (?)`, "two")
-	be.NilErr(t, err)
+	var tasks []Task
+	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM nonexistent")
+	if err == nil {
+		t.Error("expected error for invalid table")
+	}
+}
 
-	t.Run("Append", func(t *testing.T) {
-		var out []Task
-		err := sqlb.ScanRows(ctx, db, sqlb.Append(&out), "select * from tasks order by id")
-		be.NilErr(t, err)
-		be.DeepEqual(t, []Task{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}}, out)
+func TestScanRowsScanError(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
+
+	var names []string
+	err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT id, name FROM tasks")
+	if err == nil {
+		t.Error("expected scan error for wrong column count")
+	}
+}
+
+func ExampleIterRows() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(
+		Task{Name: "alice", Age: 30},
+		Task{Name: "bob", Age: 25},
+	))
+
+	for task, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM tasks ORDER BY name") {
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println(task.Name, task.Age)
+	}
+	// Output:
+	// alice 30
+	// bob 25
+}
+
+func TestIterRowsQueryError(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	for _, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM nonexistent") {
+		if err == nil {
+			t.Error("expected error for invalid table")
+		}
+		return
+	}
+	t.Error("expected at least one iteration")
+}
+
+func TestIterRowsScanError(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
+
+	for _, err := range sqlb.IterRows[Task](ctx, db, "SELECT id, name, age, 'extra' as extra FROM tasks") {
+		if err == nil {
+			t.Error("expected scan error for unknown column")
+		}
+		return
+	}
+}
+
+func ExampleExec() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	err := sqlb.Exec(ctx, db, "INSERT INTO tasks (name) VALUES (?)", "alice")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("inserted")
+	// Output:
+	// inserted
+}
+
+func ExampleAppend() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
+
+	var tasks []Task
+	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY id")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(tasks))
+	fmt.Println(tasks[0].Name)
+	// Output:
+	// 2
+	// one
+}
+
+func ExampleAppendPtr() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
+
+	var tasks []*Task
+	err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&tasks), "SELECT * FROM tasks ORDER BY id")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(tasks))
+	fmt.Println(tasks[0].Name)
+	// Output:
+	// 2
+	// one
+}
+
+func ExampleValues() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	var x, y int
+	err := sqlb.ScanRow(ctx, db, sqlb.Values(&x, &y), "SELECT 10, 20")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(x, y)
+	// Output:
+	// 10 20
+}
+
+func ExampleAppendValue() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(
+		Task{Name: "alice"},
+		Task{Name: "bob"},
+		Task{Name: "carol"},
+	))
+
+	var names []string
+	err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT name FROM tasks ORDER BY name")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(names)
+	// Output:
+	// [alice bob carol]
+}
+
+func ExampleSetValue() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(
+		Task{Name: "alice"},
+		Task{Name: "bob"},
+		Task{Name: "alice"},
+	))
+
+	names := make(map[string]struct{})
+	err := sqlb.ScanRows(ctx, db, sqlb.SetValue(names), "SELECT name FROM tasks")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(len(names))
+	// Output:
+	// 2
+}
+
+func ExampleJSON() {
+	ctx := context.Background()
+	db, _ := sql.Open("sqlite3", ":memory:")
+	defer db.Close()
+	_ = sqlb.Exec(ctx, db, `CREATE TABLE config (id INTEGER PRIMARY KEY, data JSON)`)
+
+	config := sqlb.NewJSON(map[string]string{"theme": "dark", "lang": "en"})
+	_ = sqlb.Exec(ctx, db, `INSERT INTO config (data) VALUES (?)`, config)
+
+	var data sqlb.JSON[map[string]string]
+	_ = sqlb.ScanRow(ctx, db, sqlb.Values(&data), "SELECT data FROM config LIMIT 1")
+	fmt.Println(data.Data["theme"])
+	// Output:
+	// dark
+}
+
+func TestJSONScanNull(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, `INSERT INTO books (details) VALUES (NULL)`)
+
+	var data sqlb.JSON[map[string]any]
+	err := sqlb.ScanRow(ctx, db, sqlb.Values(&data), "SELECT details FROM books LIMIT 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Data != nil {
+		t.Errorf("expected nil data for NULL column, got %v", data.Data)
+	}
+}
+
+func ExampleWithLogFunc() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	ctx = sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
+		fmt.Printf("type=%s query=%s\n", typ, query)
 	})
 
-	t.Run("AppendPtr", func(t *testing.T) {
-		var out []*Task
-		err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&out), "select * from tasks order by id")
-		be.NilErr(t, err)
-		be.DeepEqual(t, []*Task{{ID: 1, Name: "one"}, {ID: 2, Name: "two"}}, out)
-	})
-
-	t.Run("Values", func(t *testing.T) {
-		var id int
-		var name string
-		err := sqlb.ScanRows(ctx, db, sqlb.Values(&id, &name), "select id, name from tasks order by id limit 1")
-		be.NilErr(t, err)
-		be.Equal(t, 1, id)
-		be.Equal(t, "one", name)
-	})
-
-	t.Run("AppendValue", func(t *testing.T) {
-		var out []int
-		err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&out), "select id  from tasks order by id")
-		be.NilErr(t, err)
-		be.DeepEqual(t, []int{1, 2}, out)
-	})
-
-	t.Run("SetValue", func(t *testing.T) {
-		var out = map[int]struct{}{}
-		err := sqlb.ScanRows(ctx, db, sqlb.SetValue(out), "select id from tasks order by id")
-		be.NilErr(t, err)
-		be.DeepEqual(t, map[int]struct{}{1: {}, 2: {}}, out)
-	})
+	var x int
+	_ = sqlb.ScanRow(ctx, db, sqlb.Values(&x), "SELECT 42")
+	// Output:
+	// type=query query=SELECT 42
 }
 
 func TestLog(t *testing.T) {
-	db := newDB(t)
 	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
 	type hookData struct {
 		typ, query string
@@ -308,116 +484,180 @@ func TestLog(t *testing.T) {
 	})
 
 	var one int
-	err := sqlb.ScanRow(ctx, db, sqlb.Values(&one), "select 1")
-	be.NilErr(t, err)
-	be.Equal(t, one, 1)
-
-	err = sqlb.Exec(ctx, db, "select 0")
-	be.NilErr(t, err)
-	be.Equal(t, one, 1)
-
-	var two int
-	err = sqlb.ScanRow(ctx, db, sqlb.Values(&two), "select 2")
-	be.NilErr(t, err)
-	be.Equal(t, two, 2)
-
-	be.Equal(t, len(hooks), 3)
-
-	be.Equal(t, hooks[0].typ, "query")
-	be.Equal(t, hooks[0].query, "select 1")
-	be.True(t, hooks[0].dur > 0)
-
-	be.Equal(t, hooks[1].typ, "exec")
-	be.Equal(t, hooks[1].query, "select 0")
-	be.True(t, hooks[1].dur > 0)
-
-	be.Equal(t, hooks[2].typ, "query")
-	be.Equal(t, hooks[2].query, "select 2")
-	be.True(t, hooks[2].dur > 0)
-}
-
-func TestJSON(t *testing.T) {
-	db := newDB(t)
-	ctx := t.Context()
-
-	expBook := Book{
-		Details: sqlb.NewJSON(map[string]any{
-			"author": "abc",
-			"date":   2025,
-		}),
+	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&one), "select 1"); err != nil {
+		t.Fatal(err)
+	}
+	if one != 1 {
+		t.Errorf("got %d, want 1", one)
 	}
 
-	var id int
-	err := sqlb.ScanRow(ctx, db, sqlb.Values(&id), `insert into books ? returning id`, sqlb.InsertSQL(expBook))
-	be.NilErr(t, err)
+	if err := sqlb.Exec(ctx, db, "select 0"); err != nil {
+		t.Fatal(err)
+	}
 
-	var book Book
-	err = sqlb.ScanRow(ctx, db, &book, `select * from books where id=?`, id)
-	be.NilErr(t, err)
-	be.Equal(t, "abc", book.Details.Data["author"])
+	var two int
+	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&two), "select 2"); err != nil {
+		t.Fatal(err)
+	}
+	if two != 2 {
+		t.Errorf("got %d, want 2", two)
+	}
+
+	if len(hooks) != 3 {
+		t.Fatalf("got %d hooks, want 3", len(hooks))
+	}
+
+	if hooks[0].typ != "query" || hooks[0].query != "select 1" || hooks[0].dur <= 0 {
+		t.Errorf("unexpected hook[0]: %+v", hooks[0])
+	}
+	if hooks[1].typ != "exec" || hooks[1].query != "select 0" || hooks[1].dur <= 0 {
+		t.Errorf("unexpected hook[1]: %+v", hooks[1])
+	}
+	if hooks[2].typ != "query" || hooks[2].query != "select 2" || hooks[2].dur <= 0 {
+		t.Errorf("unexpected hook[2]: %+v", hooks[2])
+	}
+}
+
+func TestLogScanRows(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	var logged bool
+	ctx = sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
+		logged = true
+	})
+
+	var tasks []Task
+	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
+		t.Fatal(err)
+	}
+	if !logged {
+		t.Error("expected log to be called")
+	}
+}
+
+func TestLogIterRows(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
+
+	var logged bool
+	ctx = sqlb.WithLogFunc(ctx, func(ctx context.Context, typ, query string, dur time.Duration) {
+		logged = true
+	})
+
+	for task, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM tasks") {
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = task
+	}
+	if !logged {
+		t.Error("expected log to be called")
+	}
+}
+
+func ExampleStmtCache() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	cache := sqlb.NewStmtCache(db)
+	defer cache.Close()
+
+	var x int
+	_ = sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "SELECT 1")
+	_ = sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "SELECT 1") // uses cached statement
+	fmt.Println(x)
+	// Output:
+	// 1
 }
 
 func TestStmtCache(t *testing.T) {
-	db := newDB(t)
 	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
 	var prepareCalls int
 	cdb := sqlb.NewStmtCache(prepareWrap{db, func(ctx context.Context, query string) {
-		t.Logf("prepared %q", query)
 		prepareCalls++
 	}})
 
 	var one int
-	err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1)
-	be.NilErr(t, err)
-	be.Equal(t, 1, one)
+	if err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1); err != nil {
+		t.Fatal(err)
+	}
+	if one != 1 {
+		t.Errorf("got %d, want 1", one)
+	}
+	if prepareCalls != 1 {
+		t.Errorf("got %d prepareCalls, want 1", prepareCalls)
+	}
 
-	be.Equal(t, 1, prepareCalls) // inc
+	if err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1); err != nil {
+		t.Fatal(err)
+	}
+	if prepareCalls != 1 {
+		t.Errorf("got %d prepareCalls, want 1 (should be cached)", prepareCalls)
+	}
 
-	err = sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1)
-	be.NilErr(t, err)
-	be.Equal(t, 1, one)
-
-	be.Equal(t, 1, prepareCalls) // unchanged
-
-	err = sqlb.Exec(ctx, cdb, "select 2")
-	be.NilErr(t, err)
-
-	be.Equal(t, 2, prepareCalls) // inc
+	if err := sqlb.Exec(ctx, cdb, "select 2"); err != nil {
+		t.Fatal(err)
+	}
+	if prepareCalls != 2 {
+		t.Errorf("got %d prepareCalls, want 2", prepareCalls)
+	}
 
 	tx, err := db.Begin()
-	be.NilErr(t, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlb.Exec(ctx, tx, "select 3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if prepareCalls != 2 {
+		t.Errorf("got %d prepareCalls, want 2 (tx doesn't use cache)", prepareCalls)
+	}
 
-	err = sqlb.Exec(ctx, tx, "select 3")
-	be.NilErr(t, err)
-
-	err = tx.Commit()
-	be.NilErr(t, err)
-
-	be.Equal(t, 2, prepareCalls) // unchanged
-
-	err = cdb.Close()
-	be.NilErr(t, err)
+	if err := cdb.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
-type prepareWrap struct {
-	*sql.DB
-	cb func(ctx context.Context, query string)
-}
+func TestStmtCachePrepareError(t *testing.T) {
+	ctx := t.Context()
+	db := newDB(ctx)
+	defer db.Close()
 
-func (pw prepareWrap) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
-	pw.cb(ctx, query)
-	return pw.DB.PrepareContext(ctx, query)
+	cache := sqlb.NewStmtCache(db)
+	defer cache.Close()
+
+	var x int
+	if err := sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "INVALID SQL"); err == nil {
+		t.Error("expected error for invalid SQL")
+	}
+
+	if err := sqlb.Exec(ctx, cache, "ANOTHER INVALID SQL"); err == nil {
+		t.Error("expected error for invalid SQL")
+	}
 }
 
 func BenchmarkStmtCache(b *testing.B) {
+	ctx := b.Context()
+
 	type bcase[T any] struct {
 		name string
 		v    T
 	}
 	dbs := []bcase[func(tb testing.TB) sqlb.ExecDB]{
-		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(tb) }},
-		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(tb)) }},
+		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(ctx) }},
+		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(b.Context())) }},
 	}
 	queries := []bcase[sqlb.Query]{
 		{"simple", sqlb.NewQuery(`select 1 where ? and ? and ? not in (?)`, 1, 1, 0, 4)},
@@ -431,28 +671,67 @@ func BenchmarkStmtCache(b *testing.B) {
 				db := db.v(b)
 				q, args := query.v.SQL()
 				for b.Loop() {
-					_, err := db.ExecContext(b.Context(), q, args...)
-					be.NilErr(b, err)
+					if _, err := db.ExecContext(b.Context(), q, args...); err != nil {
+						b.Fatal(err)
+					}
 				}
 			})
 		}
 	}
 }
 
-func newDB(tb testing.TB) *sql.DB {
-	tmpDir := tb.TempDir()
-	db, err := sql.Open("sqlite3", filepath.Join(tmpDir, "db"))
-	be.NilErr(tb, err)
-	tb.Cleanup(func() {
-		_ = db.Close()
-	})
+func Example_cRUD() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
 
-	ctx := tb.Context()
-	_, err = db.ExecContext(ctx, `create table tasks (id integer primary key autoincrement, name text not null default "", age integer not null default 0)`)
-	be.NilErr(tb, err)
-	_, err = db.ExecContext(ctx, `create table books (id integer primary key autoincrement, details json)`)
-	be.NilErr(tb, err)
+	task := Task{Name: "alice", Age: 30}
+	err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task))
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("inserted:", task.ID, task.Name, task.Age)
 
+	task.Age = 31
+	err = sqlb.ScanRow(ctx, db, &task, "UPDATE tasks SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(task), task.ID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("updated:", task.ID, task.Name, task.Age)
+
+	var readTask Task
+	err = sqlb.ScanRow(ctx, db, &readTask, "SELECT * FROM tasks WHERE id = ?", task.ID)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("read:", readTask.ID, readTask.Name, readTask.Age)
+	// Output:
+	// inserted: 1 alice 30
+	// updated: 1 alice 31
+	// read: 1 alice 31
+}
+
+type prepareWrap struct {
+	*sql.DB
+	cb func(ctx context.Context, query string)
+}
+
+func (pw prepareWrap) PrepareContext(ctx context.Context, query string) (*sql.Stmt, error) {
+	pw.cb(ctx, query)
+	return pw.DB.PrepareContext(ctx, query)
+}
+
+func newDB(ctx context.Context) *sql.DB {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		panic(err)
+	}
+	if err := sqlb.Exec(ctx, db, `create table tasks (id integer primary key autoincrement, name text not null default "", age integer not null default 0)`); err != nil {
+		panic(err)
+	}
+	if err := sqlb.Exec(ctx, db, `create table books (id integer primary key autoincrement, details json)`); err != nil {
+		panic(err)
+	}
 	return db
 }
 

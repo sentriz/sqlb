@@ -312,13 +312,6 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 
 // IterRows returns a pull-based iterator ([iter.Seq2]) over query results.
 // T must implement [Scannable] via its pointer type.
-//
-//	for user, err := range sqlb.IterRows[User](ctx, db, "SELECT * FROM users") {
-//	    if err != nil {
-//	        return err
-//	    }
-//	    fmt.Println(user.Name)
-//	}
 func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
@@ -370,9 +363,6 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 
 // Append returns a [Scannable] that appends rows to dest.
 // T must implement [Scannable].
-//
-//	var dest []Job
-//	sqlb.ScanRows(ctx, db, Append(&dest), ...)
 func Append[T any, pT ScannablePtr[T]](dest *[]T) Scannable {
 	return scanAppend[T, pT]{dest}
 }
@@ -392,9 +382,6 @@ func (p scanAppend[T, pT]) ScanFrom(rows *sql.Rows) error {
 
 // AppendPtr returns a [Scannable] that appends row pointers to dest.
 // T must implement [Scannable].
-//
-//	var dest []*Job
-//	sqlb.ScanRows(ctx, db, AppendPtr(&dest), ...)
 func AppendPtr[T any, pT ScannablePtr[T]](dest *[]*T) Scannable {
 	return scanAppendPtr[T, pT]{dest}
 }
@@ -414,9 +401,6 @@ func (p scanAppendPtr[T, pT]) ScanFrom(rows *sql.Rows) error {
 
 // Values returns a [Scannable] that scans columns into the provided pointers.
 // For use with primitive types.
-//
-//	var a, b int
-//	sqlb.ScanRow(ctx, db, Values(&a, &b), ...)
 func Values(dests ...any) Scannable {
 	return scanValues(dests)
 }
@@ -429,9 +413,6 @@ func (p scanValues) ScanFrom(rows *sql.Rows) error {
 
 // AppendValue returns a [Scannable] that appends a single column value to dest.
 // For use with primitive types.
-//
-//	var dest []int
-//	sqlb.ScanRows(ctx, db, AppendValue(&dest), ...)
 func AppendValue[T any](s *[]T) Scannable {
 	return (*scanAppendValue[T])(s)
 }
@@ -449,9 +430,6 @@ func (p *scanAppendValue[T]) ScanFrom(rows *sql.Rows) error {
 
 // SetValue returns a [Scannable] that inserts a single column value into dest.
 // For use with primitive types.
-//
-//	var dest = map[string]struct{}{}
-//	sqlb.ScanRows(ctx, db, SetValue(dest), ...)
 func SetValue[T comparable](s map[T]struct{}) Scannable {
 	return (scanSet[T])(s)
 }

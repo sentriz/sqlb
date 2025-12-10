@@ -4,7 +4,6 @@ go 1.24
 
 // testing only
 require (
-	github.com/carlmjohnson/be v0.24.1
 	github.com/ncruces/go-sqlite3 v0.25.1
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1
