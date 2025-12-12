@@ -26,7 +26,7 @@
 //
 // Use sqlbgen to generate [Scannable], [Insertable], and [Updatable] implementations:
 //
-//	//go:generate go tool sqlbgen -to user.gen.go -generated id User
+//	//go:generate go tool sqlbgen -to user.gen.go -generated ID User
 //
 // # Query Building
 //

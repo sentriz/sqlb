@@ -15,11 +15,11 @@ import (
 func main() {
 	dest := flag.String("to", "", "output file (required)")
 	var generated stringsFlag
-	flag.Var(&generated, "generated", "generated/auto-increment column to skip on insert/update (repeatable)")
+	flag.Var(&generated, "generated", "generated/auto-increment field to skip on insert/update (repeatable)")
 	flag.Parse()
 
 	if *dest == "" || flag.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "usage: sqlbgen -to output.gen.go [-generated column]... TypeName")
+		fmt.Fprintln(os.Stderr, "usage: sqlbgen -to output.gen.go [-generated FieldName]... TypeName")
 		os.Exit(1)
 	}
 
@@ -92,7 +92,7 @@ func main() {
 	if len(generated) > 0 {
 		var cases []string
 		for _, col := range generated {
-			cases = append(cases, fmt.Sprintf("%q", col))
+			cases = append(cases, fmt.Sprintf("%q", toSnake(col)))
 		}
 		caseStr := strings.Join(cases, ", ")
 
