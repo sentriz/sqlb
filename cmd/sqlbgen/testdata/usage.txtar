@@ -1,13 +1,16 @@
 ! exec sqlb
-stderr 'need at least one type name'
+stderr 'usage: sqlbgen'
+
+! exec sqlb -to out.go
+stderr 'usage: sqlbgen'
 
 ! exec sqlb SomeType
-stderr 'need GOFILE'
+stderr 'usage: sqlbgen'
 
 env GOFILE=main.go
-! exec sqlb SomeType
+! exec sqlb -to out.go SomeType
 stderr 'need GOPACKAGE'
 
 env GOPACKAGE=main
-! exec sqlb SomeType
+! exec sqlb -to out.go SomeType
 stderr 'open main.go: no such file or directory'

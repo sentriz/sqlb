@@ -1,23 +1,29 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"unicode"
 )
 
 func main() {
-	if len(os.Args) == 1 {
-		fmt.Fprintln(os.Stderr, "need at least one type name")
+	dest := flag.String("to", "", "output file (required)")
+	var generated stringsFlag
+	flag.Var(&generated, "generated", "generated/auto-increment column to skip on insert/update (repeatable)")
+	flag.Parse()
+
+	if *dest == "" || flag.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "usage: sqlbgen -to output.gen.go [-generated column]... TypeName")
 		os.Exit(1)
 	}
-	typeNames := os.Args[1:]
+
+	typeName := flag.Arg(0)
 
 	goFile := os.Getenv("GOFILE")
 	if goFile == "" {
@@ -37,37 +43,25 @@ func main() {
 		os.Exit(1)
 	}
 
-	typeFields := make(map[string][]string)
+	var fields []string
 	for n := range ast.Preorder(node) {
 		typeSpec, ok := n.(*ast.TypeSpec)
-		if !ok {
+		if !ok || typeSpec.Name.Name != typeName {
 			continue
 		}
-
-		typeName := typeSpec.Name.Name
-		if !slices.Contains(typeNames, typeName) {
-			continue
-		}
-
 		structType, ok := typeSpec.Type.(*ast.StructType)
 		if !ok {
 			continue
 		}
-
-		var fields []string
 		for _, field := range structType.Fields.List {
 			for _, name := range field.Names {
 				fields = append(fields, name.Name)
 			}
 		}
-
-		typeFields[typeName] = fields
+		break
 	}
 
-	ext := filepath.Ext(goFile)
-	destName := strings.TrimSuffix(goFile, ext) + ".gen" + ext
-
-	destf, err := os.Create(destName)
+	destf, err := os.Create(*dest)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create dest file: %v\n", err)
 		os.Exit(1)
@@ -83,75 +77,81 @@ func main() {
 	fmt.Fprintf(destf, "\t\"fmt\"\n")
 	fmt.Fprintf(destf, ")\n")
 
-	for _, typeName := range typeNames {
-		fmt.Fprintf(destf, "\n")
+	firstChar := strings.ToLower(string([]rune(typeName)[0]))
 
-		fields := typeFields[typeName]
+	fmt.Fprintf(destf, "\nfunc _() {\n")
+	fmt.Fprintf(destf, "\t// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.\n")
+	fmt.Fprintf(destf, "\tvar %s %s\n", firstChar, typeName)
+	var fieldRefs []string
+	for _, field := range fields {
+		fieldRefs = append(fieldRefs, fmt.Sprintf("%s.%s", firstChar, field))
+	}
+	fmt.Fprintf(destf, "\t_ = %s{%s}\n", typeName, strings.Join(fieldRefs, ", "))
+	fmt.Fprintf(destf, "}\n")
 
-		firstChar := strings.ToLower(string([]rune(typeName)[0]))
-
-		fmt.Fprintf(destf, "func _() {\n")
-		fmt.Fprintf(destf, "\t// Validate the struct fields haven't changed. If this doesn't compile you probably need to `go generate` again.\n")
-		fmt.Fprintf(destf, "\tvar %s %s\n", firstChar, typeName)
-
-		var fieldRefs []string
-		for _, field := range fields {
-			fieldRefs = append(fieldRefs, fmt.Sprintf("%s.%s", firstChar, field))
+	if len(generated) > 0 {
+		var cases []string
+		for _, col := range generated {
+			cases = append(cases, fmt.Sprintf("%q", col))
 		}
+		caseStr := strings.Join(cases, ", ")
 
-		fmt.Fprintf(destf, "\t_ = %s{%s}\n", typeName, strings.Join(fieldRefs, ", "))
-		fmt.Fprintf(destf, "}\n")
-
-		fmt.Fprintf(destf, "\n")
-		fmt.Fprintf(destf, "func (%s) PrimaryKey() string {\n", typeName)
-		fmt.Fprintf(destf, "\treturn \"id\"\n") // TODO: flexible PK(s)
-		fmt.Fprintf(destf, "}\n")
-
-		fmt.Fprintf(destf, "\n")
-		fmt.Fprintf(destf, "func (%s %s) Values() []sql.NamedArg {\n", firstChar, typeName)
-
-		var namedArgs []string
-		for _, f := range fields {
-			namedArgs = append(namedArgs, fmt.Sprintf("sql.Named(\"%s\", %s.%s)", toSnake(f), firstChar, f))
-		}
-
-		fmt.Fprintf(destf, "\treturn []sql.NamedArg{%s}\n", strings.Join(namedArgs, ", "))
-		fmt.Fprintf(destf, "}\n")
-
-		fmt.Fprintf(destf, "\n")
-		fmt.Fprintf(destf, "func (%s *%s) ScanFrom(rows *sql.Rows) error {\n", firstChar, typeName)
-		fmt.Fprintf(destf, "\tcolumns, err := rows.Columns()\n")
-		fmt.Fprintf(destf, "\tif err != nil {\n")
-		fmt.Fprintf(destf, "\t\treturn err\n")
+		fmt.Fprintf(destf, "\nfunc (%s) IsGenerated(c string) bool {\n", typeName)
+		fmt.Fprintf(destf, "\tswitch c {\n")
+		fmt.Fprintf(destf, "\tcase %s:\n", caseStr)
+		fmt.Fprintf(destf, "\t\treturn true\n")
 		fmt.Fprintf(destf, "\t}\n")
-		fmt.Fprintf(destf, "\tdests := make([]any, 0, len(columns))\n")
-		fmt.Fprintf(destf, "\tfor _, c := range columns {\n")
-		fmt.Fprintf(destf, "\t\tswitch c {\n")
-
-		for _, f := range fields {
-			fmt.Fprintf(destf, "\t\tcase \"%s\":\n", toSnake(f))
-			fmt.Fprintf(destf, "\t\t\tdests = append(dests, &%s.%s)\n", firstChar, f)
-		}
-
-		fmt.Fprintf(destf, "\t\tdefault:\n")
-		fmt.Fprintf(destf, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", c)\n")
-		fmt.Fprintf(destf, "\t\t}\n")
-		fmt.Fprintf(destf, "\t}\n")
-		fmt.Fprintf(destf, "\treturn rows.Scan(dests...)\n")
+		fmt.Fprintf(destf, "\treturn false\n")
 		fmt.Fprintf(destf, "}\n")
 	}
+
+	fmt.Fprintf(destf, "\nfunc (%s %s) Values() []sql.NamedArg {\n", firstChar, typeName)
+	var namedArgs []string
+	for _, f := range fields {
+		namedArgs = append(namedArgs, fmt.Sprintf("sql.Named(\"%s\", %s.%s)", toSnake(f), firstChar, f))
+	}
+	fmt.Fprintf(destf, "\treturn []sql.NamedArg{%s}\n", strings.Join(namedArgs, ", "))
+	fmt.Fprintf(destf, "}\n")
+
+	fmt.Fprintf(destf, "\nfunc (%s *%s) ScanFrom(rows *sql.Rows) error {\n", firstChar, typeName)
+	fmt.Fprintf(destf, "\tcolumns, err := rows.Columns()\n")
+	fmt.Fprintf(destf, "\tif err != nil {\n")
+	fmt.Fprintf(destf, "\t\treturn err\n")
+	fmt.Fprintf(destf, "\t}\n")
+	fmt.Fprintf(destf, "\tdests := make([]any, 0, len(columns))\n")
+	fmt.Fprintf(destf, "\tfor _, c := range columns {\n")
+	fmt.Fprintf(destf, "\t\tswitch c {\n")
+	for _, f := range fields {
+		fmt.Fprintf(destf, "\t\tcase \"%s\":\n", toSnake(f))
+		fmt.Fprintf(destf, "\t\t\tdests = append(dests, &%s.%s)\n", firstChar, f)
+	}
+	fmt.Fprintf(destf, "\t\tdefault:\n")
+	fmt.Fprintf(destf, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", c)\n")
+	fmt.Fprintf(destf, "\t\t}\n")
+	fmt.Fprintf(destf, "\t}\n")
+	fmt.Fprintf(destf, "\treturn rows.Scan(dests...)\n")
+	fmt.Fprintf(destf, "}\n")
 }
 
 func toSnake(s string) string {
 	var result strings.Builder
-	for i, char := range s {
+	runes := []rune(s)
+	for i, char := range runes {
 		if i > 0 && unicode.IsUpper(char) {
-			if unicode.IsLower(rune(s[i-1])) || unicode.IsDigit(rune(s[i-1])) || (i+1 < len(s) && unicode.IsUpper(char) && i+1 < len(s) && unicode.IsLower(rune(s[i+1]))) {
+			prev := runes[i-1]
+			if unicode.IsLower(prev) || unicode.IsDigit(prev) || (i+1 < len(runes) && unicode.IsLower(runes[i+1])) {
 				result.WriteRune('_')
 			}
 		}
 		result.WriteRune(unicode.ToLower(char))
 	}
-
 	return result.String()
+}
+
+type stringsFlag []string
+
+func (s stringsFlag) String() string { return strings.Join(s, ", ") }
+func (s *stringsFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
 }

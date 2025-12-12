@@ -453,6 +453,26 @@ func TestJSONScanNull(t *testing.T) {
 	}
 }
 
+func TestJSONScanString(t *testing.T) {
+	// Test that JSON.Scan handles string type (some drivers return string instead of []byte)
+	var data sqlb.JSON[map[string]string]
+	err := data.Scan(`{"key":"value"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data.Data["key"] != "value" {
+		t.Errorf("expected key=value, got %v", data.Data)
+	}
+}
+
+func TestJSONScanInvalidType(t *testing.T) {
+	var data sqlb.JSON[map[string]any]
+	err := data.Scan(123)
+	if err == nil {
+		t.Error("expected error for invalid type")
+	}
+}
+
 func ExampleWithLogFunc() {
 	ctx := context.Background()
 	db := newDB(ctx)
@@ -741,8 +761,8 @@ type Task struct {
 	Age  int
 }
 
-func (Task) PrimaryKey() string {
-	return "id"
+func (Task) IsGenerated(c string) bool {
+	return c == "id"
 }
 
 func (t Task) Values() []sql.NamedArg {
@@ -775,8 +795,8 @@ type Book struct {
 	Details sqlb.JSON[map[string]any]
 }
 
-func (Book) PrimaryKey() string {
-	return "id"
+func (Book) IsGenerated(c string) bool {
+	return c == "id"
 }
 
 func (b Book) Values() []sql.NamedArg {

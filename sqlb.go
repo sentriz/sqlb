@@ -26,7 +26,7 @@
 //
 // Use sqlbgen to generate [Scannable], [Insertable], and [Updatable] implementations:
 //
-//	//go:generate go tool sqlbgen User Post Comment
+//	//go:generate go tool sqlbgen -to user.gen.go -generated id User
 //
 // # Query Building
 //
@@ -158,19 +158,19 @@ type SQLer interface {
 	SQL() (string, []any)
 }
 
-// Updatable represents a struct that can produce its primary key and values for updates.
+// Updatable represents a struct that can produce values for updates.
 type Updatable interface {
-	PrimaryKey() string
+	IsGenerated(column string) bool
 	Values() []sql.NamedArg
 }
 
-// UpdateSQL builds a SQLer representing the update for the Updatable.
-// Fields matching the primary key are skipped and not updated.
+// UpdateSQL builds a [SQLer] representing the update for the [Updatable].
+// Generated columns (where [Updatable.IsGenerated] returns true) are skipped.
 func UpdateSQL(item Updatable) SQLer {
 	var set bool
 	var b Query
 	for _, v := range item.Values() {
-		if v.Name == item.PrimaryKey() {
+		if item.IsGenerated(v.Name) {
 			continue
 		}
 		var p string
@@ -183,14 +183,14 @@ func UpdateSQL(item Updatable) SQLer {
 	return b
 }
 
-// Insertable represents a struct that can provide a primary key and values for insertion.
+// Insertable represents a struct that can provide values for insertion.
 type Insertable interface {
-	PrimaryKey() string
+	IsGenerated(column string) bool
 	Values() []sql.NamedArg
 }
 
-// InsertSQL builds a SQLer representing an INSERT for one or more Insertable items.
-// Skips the primary key field in columns and values.
+// InsertSQL builds a [SQLer] representing an INSERT for one or more [Insertable] items.
+// Generated columns (where [Insertable.IsGenerated] returns true) are skipped.
 func InsertSQL[T Insertable](items ...T) SQLer {
 	if len(items) == 0 {
 		panic("InsertSQL called with zero arguments")
@@ -201,7 +201,7 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 
 	columns := make([]string, 0, len(firstValues))
 	for _, v := range firstValues {
-		if v.Name == first.PrimaryKey() {
+		if first.IsGenerated(v.Name) {
 			continue
 		}
 		columns = append(columns, v.Name)
@@ -212,7 +212,7 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 	for _, item := range items {
 		placeholders := make([]string, 0, len(columns))
 		for _, v := range item.Values() {
-			if v.Name == item.PrimaryKey() {
+			if item.IsGenerated(v.Name) {
 				continue
 			}
 			placeholders = append(placeholders, "?")
@@ -227,7 +227,7 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 	)
 }
 
-// InSQL builds a SQLer for an IN clause or value tuple, e.g. (?, ?, ?).
+// InSQL builds a [SQLer] for an IN clause or value tuple, e.g. (?, ?, ?).
 // Panics if called with zero items.
 func InSQL[T any](items ...T) SQLer {
 	if len(items) == 0 {
@@ -252,14 +252,14 @@ type Scannable interface {
 }
 
 // ScannablePtr is a constraint for pointer types that implement [Scannable].
-// It allows sqlb to allocate a new T and scan it's *T.
-// It should not be used directly, since Go will infer it from the first type argument in [IterRows], [AppendPtr] and [Append].
+// It allows sqlb to allocate a new T and scan its *T.
+// It should not be used directly, since Go will infer it from the first type argument in [IterRows], [AppendPtr], and [Append].
 type ScannablePtr[T any] interface {
 	Scannable
 	*T
 }
 
-// ScanDB is an interface compatible with *sql.DB or *sql.Tx for queries.
+// ScanDB is an interface compatible with [*sql.DB] or [*sql.Tx] for queries.
 type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
@@ -307,7 +307,7 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 			return err
 		}
 	}
-	return nil
+	return rows.Err()
 }
 
 // IterRows returns a pull-based iterator ([iter.Seq2]) over query results.
@@ -341,10 +341,14 @@ func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query s
 				break
 			}
 		}
+		if err := rows.Err(); err != nil {
+			var zero T
+			yield(zero, err)
+		}
 	}
 }
 
-// ExecDB is an interface compatible with *sql.DB or *sql.Tx for executing queries.
+// ExecDB is an interface compatible with [*sql.DB] or [*sql.Tx] for executing queries.
 type ExecDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
@@ -461,9 +465,14 @@ func (j *JSON[T]) Scan(value any) error {
 	if value == nil {
 		return nil
 	}
-	b, ok := value.([]byte)
-	if !ok {
-		return fmt.Errorf("want []byte, got %T", value)
+	var b []byte
+	switch v := value.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		return fmt.Errorf("want []byte or string, got %T", value)
 	}
 	return json.Unmarshal(b, &j.Data)
 }
@@ -494,7 +503,7 @@ func log(ctx context.Context, lf LogFunc, typ string, query string) func() {
 	}
 }
 
-// PrepareDB is an interface compatible with *sql.DB or *sql.Tx for preparing statements.
+// PrepareDB is an interface compatible with [*sql.DB] or [*sql.Tx] for preparing statements.
 type PrepareDB interface {
 	PrepareContext(ctx context.Context, query string) (*sql.Stmt, error)
 }
