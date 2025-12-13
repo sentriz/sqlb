@@ -107,8 +107,7 @@ func ExampleInsertSQL() {
 	defer db.Close()
 
 	task := Task{Name: "alice", Age: 30}
-	err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task))
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
 		panic(err)
 	}
 	fmt.Println(task.ID, task.Name, task.Age)
@@ -177,8 +176,7 @@ func ExampleScanRow() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "alice", Age: 30}))
 
 	var task Task
-	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice")
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice"); err != nil {
 		panic(err)
 	}
 	fmt.Println(task.Name, task.Age)
@@ -222,8 +220,7 @@ func ExampleScanRows() {
 	))
 
 	var tasks []Task
-	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name")
-	if err != nil {
+	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name"); err != nil {
 		panic(err)
 	}
 	for _, t := range tasks {
@@ -316,8 +313,7 @@ func ExampleExec() {
 	db := newDB(ctx)
 	defer db.Close()
 
-	err := sqlb.Exec(ctx, db, "INSERT INTO tasks (name) VALUES (?)", "alice")
-	if err != nil {
+	if err := sqlb.Exec(ctx, db, "INSERT INTO tasks (name) VALUES (?)", "alice"); err != nil {
 		panic(err)
 	}
 	fmt.Println("inserted")
@@ -333,8 +329,7 @@ func ExampleAppend() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
 
 	var tasks []Task
-	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY id")
-	if err != nil {
+	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(tasks))
@@ -352,8 +347,7 @@ func ExampleAppendPtr() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
 
 	var tasks []*Task
-	err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&tasks), "SELECT * FROM tasks ORDER BY id")
-	if err != nil {
+	if err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(tasks))
@@ -369,8 +363,7 @@ func ExampleValues() {
 	defer db.Close()
 
 	var x, y int
-	err := sqlb.ScanRow(ctx, db, sqlb.Values(&x, &y), "SELECT 10, 20")
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&x, &y), "SELECT 10, 20"); err != nil {
 		panic(err)
 	}
 	fmt.Println(x, y)
@@ -390,8 +383,7 @@ func ExampleAppendValue() {
 	))
 
 	var names []string
-	err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT name FROM tasks ORDER BY name")
-	if err != nil {
+	if err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT name FROM tasks ORDER BY name"); err != nil {
 		panic(err)
 	}
 	fmt.Println(names)
@@ -411,8 +403,7 @@ func ExampleSetValue() {
 	))
 
 	names := make(map[string]struct{})
-	err := sqlb.ScanRows(ctx, db, sqlb.SetValue(names), "SELECT name FROM tasks")
-	if err != nil {
+	if err := sqlb.ScanRows(ctx, db, sqlb.SetValue(names), "SELECT name FROM tasks"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(names))
@@ -706,22 +697,19 @@ func Example_cRUD() {
 	defer db.Close()
 
 	task := Task{Name: "alice", Age: 30}
-	err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task))
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
 		panic(err)
 	}
 	fmt.Println("inserted:", task.ID, task.Name, task.Age)
 
 	task.Age = 31
-	err = sqlb.ScanRow(ctx, db, &task, "UPDATE tasks SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(task), task.ID)
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, &task, "UPDATE tasks SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(task), task.ID); err != nil {
 		panic(err)
 	}
 	fmt.Println("updated:", task.ID, task.Name, task.Age)
 
 	var readTask Task
-	err = sqlb.ScanRow(ctx, db, &readTask, "SELECT * FROM tasks WHERE id = ?", task.ID)
-	if err != nil {
+	if err := sqlb.ScanRow(ctx, db, &readTask, "SELECT * FROM tasks WHERE id = ?", task.ID); err != nil {
 		panic(err)
 	}
 	fmt.Println("read:", readTask.ID, readTask.Name, readTask.Age)
