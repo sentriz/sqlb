@@ -30,6 +30,10 @@ func _() {
 	_ = Event{e.Timestamp, e.Type, e.Data}
 }
 
+func (Event) IsGenerated(c string) bool {
+	return false
+}
+
 func (e Event) Values() []sql.NamedArg {
 	return []sql.NamedArg{sql.Named("timestamp", e.Timestamp), sql.Named("type", e.Type), sql.Named("data", e.Data)}
 }

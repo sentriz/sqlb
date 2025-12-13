@@ -89,21 +89,19 @@ func main() {
 	fmt.Fprintf(destf, "\t_ = %s{%s}\n", typeName, strings.Join(fieldRefs, ", "))
 	fmt.Fprintf(destf, "}\n")
 
+	fmt.Fprintf(destf, "\nfunc (%s) IsGenerated(c string) bool {\n", typeName)
 	if len(generated) > 0 {
 		var cases []string
 		for _, col := range generated {
 			cases = append(cases, fmt.Sprintf("%q", toSnake(col)))
 		}
-		caseStr := strings.Join(cases, ", ")
-
-		fmt.Fprintf(destf, "\nfunc (%s) IsGenerated(c string) bool {\n", typeName)
 		fmt.Fprintf(destf, "\tswitch c {\n")
-		fmt.Fprintf(destf, "\tcase %s:\n", caseStr)
+		fmt.Fprintf(destf, "\tcase %s:\n", strings.Join(cases, ", "))
 		fmt.Fprintf(destf, "\t\treturn true\n")
 		fmt.Fprintf(destf, "\t}\n")
-		fmt.Fprintf(destf, "\treturn false\n")
-		fmt.Fprintf(destf, "}\n")
 	}
+	fmt.Fprintf(destf, "\treturn false\n")
+	fmt.Fprintf(destf, "}\n")
 
 	fmt.Fprintf(destf, "\nfunc (%s %s) Values() []sql.NamedArg {\n", firstChar, typeName)
 	var namedArgs []string

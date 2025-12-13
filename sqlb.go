@@ -333,17 +333,18 @@ func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query s
 			if err := pT(&t).ScanFrom(rows); err != nil {
 				var zero T
 				if !yield(zero, err) {
-					break
+					return
 				}
 				continue
 			}
 			if !yield(t, nil) {
-				break
+				return
 			}
 		}
 		if err := rows.Err(); err != nil {
 			var zero T
 			yield(zero, err)
+			return
 		}
 	}
 }
