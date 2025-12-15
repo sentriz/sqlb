@@ -75,6 +75,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -82,8 +83,9 @@ import (
 
 // Query represents a composable SQL query builder with arguments.
 type Query struct {
-	query *strings.Builder
-	args  []any
+	query    *strings.Builder
+	args     []any
+	lastByte byte
 }
 
 // NewQuery creates a new Query by appending the initial query string and arguments.
@@ -104,11 +106,14 @@ func (q *Query) Append(query string, args ...any) {
 		q.query = &strings.Builder{}
 	}
 
-	if q.query.Len() > 0 && q.query.String()[q.query.Len()-1] != ' ' {
-		q.query.WriteRune(' ')
+	if q.query.Len() > 0 && q.lastByte != ' ' {
+		q.query.WriteByte(' ')
 	}
 
 	q.query.WriteString(query)
+	if len(query) > 0 {
+		q.lastByte = query[len(query)-1]
+	}
 	q.args = append(q.args, args...)
 }
 
@@ -207,18 +212,19 @@ func InsertSQL[T Insertable](items ...T) SQLer {
 		columns = append(columns, v.Name)
 	}
 
-	rows := make([]string, 0, len(items))
+	placeholders := slices.Repeat([]string{"?"}, len(columns))
+	rowPlaceholder := "(" + strings.Join(placeholders, ", ") + ")"
+
+	rows := make([]string, len(items))
 	values := make([]any, 0, len(columns)*len(items))
-	for _, item := range items {
-		placeholders := make([]string, 0, len(columns))
+	for i, item := range items {
 		for _, v := range item.Values() {
 			if item.IsGenerated(v.Name) {
 				continue
 			}
-			placeholders = append(placeholders, "?")
 			values = append(values, v.Value)
 		}
-		rows = append(rows, fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")))
+		rows[i] = rowPlaceholder
 	}
 
 	return NewQuery(
@@ -234,16 +240,15 @@ func InSQL[T any](items ...T) SQLer {
 		panic("InSQL called with zero arguments")
 	}
 
-	placeholders := make([]string, len(items))
-	for i := range placeholders {
-		placeholders[i] = "?"
-	}
+	placeholders := slices.Repeat([]string{"?"}, len(items))
+	rowPlaceholder := "(" + strings.Join(placeholders, ", ") + ")"
+
 	values := make([]any, 0, len(items))
 	for _, v := range items {
 		values = append(values, v)
 	}
 
-	return NewQuery(fmt.Sprintf("(%s)", strings.Join(placeholders, ", ")), values...)
+	return NewQuery(rowPlaceholder, values...)
 }
 
 // Scannable represents a value that can be scanned from a row.
