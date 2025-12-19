@@ -111,23 +111,18 @@ func main() {
 	fmt.Fprintf(destf, "\treturn []sql.NamedArg{%s}\n", strings.Join(namedArgs, ", "))
 	fmt.Fprintf(destf, "}\n")
 
-	fmt.Fprintf(destf, "\nfunc (%s *%s) ScanFrom(rows *sql.Rows) error {\n", firstChar, typeName)
-	fmt.Fprintf(destf, "\tcolumns, err := rows.Columns()\n")
-	fmt.Fprintf(destf, "\tif err != nil {\n")
-	fmt.Fprintf(destf, "\t\treturn err\n")
-	fmt.Fprintf(destf, "\t}\n")
-	fmt.Fprintf(destf, "\tdests := make([]any, 0, len(columns))\n")
+	fmt.Fprintf(destf, "\nfunc (%s *%s) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {\n", firstChar, typeName)
 	fmt.Fprintf(destf, "\tfor _, c := range columns {\n")
 	fmt.Fprintf(destf, "\t\tswitch c {\n")
 	for _, f := range fields {
 		fmt.Fprintf(destf, "\t\tcase \"%s\":\n", toSnake(f))
-		fmt.Fprintf(destf, "\t\t\tdests = append(dests, &%s.%s)\n", firstChar, f)
+		fmt.Fprintf(destf, "\t\t\tbuf = append(buf, &%s.%s)\n", firstChar, f)
 	}
 	fmt.Fprintf(destf, "\t\tdefault:\n")
 	fmt.Fprintf(destf, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", c)\n")
 	fmt.Fprintf(destf, "\t\t}\n")
 	fmt.Fprintf(destf, "\t}\n")
-	fmt.Fprintf(destf, "\treturn rows.Scan(dests...)\n")
+	fmt.Fprintf(destf, "\treturn rows.Scan(buf...)\n")
 	fmt.Fprintf(destf, "}\n")
 }
 

@@ -38,23 +38,18 @@ func (e Event) Values() []sql.NamedArg {
 	return []sql.NamedArg{sql.Named("timestamp", e.Timestamp), sql.Named("type", e.Type), sql.Named("data", e.Data)}
 }
 
-func (e *Event) ScanFrom(rows *sql.Rows) error {
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-	dests := make([]any, 0, len(columns))
+func (e *Event) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	for _, c := range columns {
 		switch c {
 		case "timestamp":
-			dests = append(dests, &e.Timestamp)
+			buf = append(buf, &e.Timestamp)
 		case "type":
-			dests = append(dests, &e.Type)
+			buf = append(buf, &e.Type)
 		case "data":
-			dests = append(dests, &e.Data)
+			buf = append(buf, &e.Data)
 		default:
 			return fmt.Errorf("unknown column name %q", c)
 		}
 	}
-	return rows.Scan(dests...)
+	return rows.Scan(buf...)
 }

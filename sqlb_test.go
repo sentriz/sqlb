@@ -757,55 +757,18 @@ func (t Task) Values() []sql.NamedArg {
 	return []sql.NamedArg{sql.Named("id", t.ID), sql.Named("name", t.Name), sql.Named("age", t.Age)}
 }
 
-func (t *Task) ScanFrom(rows *sql.Rows) error {
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-	dests := make([]any, 0, len(columns))
+func (t *Task) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	for _, c := range columns {
 		switch c {
 		case "id":
-			dests = append(dests, &t.ID)
+			buf = append(buf, &t.ID)
 		case "name":
-			dests = append(dests, &t.Name)
+			buf = append(buf, &t.Name)
 		case "age":
-			dests = append(dests, &t.Age)
+			buf = append(buf, &t.Age)
 		default:
 			return fmt.Errorf("unknown column name %q", c)
 		}
 	}
-	return rows.Scan(dests...)
-}
-
-type Book struct {
-	ID      int
-	Details sqlb.JSON[map[string]any]
-}
-
-func (Book) IsGenerated(c string) bool {
-	return c == "id"
-}
-
-func (b Book) Values() []sql.NamedArg {
-	return []sql.NamedArg{sql.Named("id", b.ID), sql.Named("details", b.Details)}
-}
-
-func (b *Book) ScanFrom(rows *sql.Rows) error {
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-	dests := make([]any, 0, len(columns))
-	for _, c := range columns {
-		switch c {
-		case "id":
-			dests = append(dests, &b.ID)
-		case "details":
-			dests = append(dests, &b.Details)
-		default:
-			return fmt.Errorf("unknown column name %q", c)
-		}
-	}
-	return rows.Scan(dests...)
+	return rows.Scan(buf...)
 }

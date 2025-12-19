@@ -41,23 +41,18 @@ func (m Membership) Values() []sql.NamedArg {
 	return []sql.NamedArg{sql.Named("user_id", m.UserID), sql.Named("team_id", m.TeamID), sql.Named("role", m.Role)}
 }
 
-func (m *Membership) ScanFrom(rows *sql.Rows) error {
-	columns, err := rows.Columns()
-	if err != nil {
-		return err
-	}
-	dests := make([]any, 0, len(columns))
+func (m *Membership) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	for _, c := range columns {
 		switch c {
 		case "user_id":
-			dests = append(dests, &m.UserID)
+			buf = append(buf, &m.UserID)
 		case "team_id":
-			dests = append(dests, &m.TeamID)
+			buf = append(buf, &m.TeamID)
 		case "role":
-			dests = append(dests, &m.Role)
+			buf = append(buf, &m.Role)
 		default:
 			return fmt.Errorf("unknown column name %q", c)
 		}
 	}
-	return rows.Scan(dests...)
+	return rows.Scan(buf...)
 }

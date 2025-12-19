@@ -253,7 +253,7 @@ func InSQL[T any](items ...T) SQLer {
 
 // Scannable represents a value that can be scanned from a row.
 type Scannable interface {
-	ScanFrom(rows *sql.Rows) error
+	ScanFrom(columns []string, rows *sql.Rows, buf []any) error
 }
 
 // ScannablePtr is a constraint for pointer types that implement [Scannable].
@@ -287,7 +287,14 @@ func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args 
 	if !rows.Next() {
 		return sql.ErrNoRows
 	}
-	if err := dest.ScanFrom(rows); err != nil {
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+
+	buf := make([]any, 0, len(columns))
+	if err := dest.ScanFrom(columns, rows, buf); err != nil {
 		return err
 	}
 	return nil
@@ -307,8 +314,14 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 	}
 	defer rows.Close()
 
+	columns, err := rows.Columns()
+	if err != nil {
+		return err
+	}
+
+	buf := make([]any, 0, len(columns))
 	for rows.Next() {
-		if err := dest.ScanFrom(rows); err != nil {
+		if err := dest.ScanFrom(columns, rows, buf[:0]); err != nil {
 			return err
 		}
 	}
@@ -333,9 +346,17 @@ func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query s
 		}
 		defer rows.Close()
 
+		columns, err := rows.Columns()
+		if err != nil {
+			var zero T
+			yield(zero, err)
+			return
+		}
+
+		buf := make([]any, 0, len(columns))
 		for rows.Next() {
 			var t T
-			if err := pT(&t).ScanFrom(rows); err != nil {
+			if err := pT(&t).ScanFrom(columns, rows, buf[:0]); err != nil {
 				var zero T
 				if !yield(zero, err) {
 					return
@@ -381,9 +402,9 @@ type scanAppend[T any, pT ScannablePtr[T]] struct {
 	s *[]T
 }
 
-func (p scanAppend[T, pT]) ScanFrom(rows *sql.Rows) error {
+func (p scanAppend[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var t T
-	if err := pT(&t).ScanFrom(rows); err != nil {
+	if err := pT(&t).ScanFrom(columns, rows, buf); err != nil {
 		return err
 	}
 	*p.s = append(*p.s, t)
@@ -400,9 +421,9 @@ type scanAppendPtr[T any, pT ScannablePtr[T]] struct {
 	s *[]*T
 }
 
-func (p scanAppendPtr[T, pT]) ScanFrom(rows *sql.Rows) error {
+func (p scanAppendPtr[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var t T
-	if err := pT(&t).ScanFrom(rows); err != nil {
+	if err := pT(&t).ScanFrom(columns, rows, buf); err != nil {
 		return err
 	}
 	*p.s = append(*p.s, &t)
@@ -417,7 +438,7 @@ func Values(dests ...any) Scannable {
 
 type scanValues []any
 
-func (p scanValues) ScanFrom(rows *sql.Rows) error {
+func (p scanValues) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	return rows.Scan(p...)
 }
 
@@ -429,7 +450,7 @@ func AppendValue[T any](s *[]T) Scannable {
 
 type scanAppendValue[T any] []T
 
-func (p *scanAppendValue[T]) ScanFrom(rows *sql.Rows) error {
+func (p *scanAppendValue[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var v T
 	if err := rows.Scan(&v); err != nil {
 		return err
@@ -446,7 +467,7 @@ func SetValue[T comparable](s map[T]struct{}) Scannable {
 
 type scanSet[T comparable] map[T]struct{}
 
-func (p scanSet[T]) ScanFrom(rows *sql.Rows) error {
+func (p scanSet[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var v T
 	if err := rows.Scan(&v); err != nil {
 		return err
