@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -717,6 +718,38 @@ func Example_cRUD() {
 	// inserted: 1 alice 30
 	// updated: 1 alice 31
 	// read: 1 alice 31
+}
+
+func BenchmarkScanBuffer(b *testing.B) {
+	ctx := b.Context()
+	db := newDB(ctx)
+	defer db.Close()
+
+	const taskCount = 5_000
+	{
+		task := Task{Name: "a", Age: 1}
+		tasks := slices.Repeat([]Task{task}, taskCount)
+
+		if err := sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(tasks...)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ReportAllocs()
+
+	tasks := make([]Task, 0, taskCount)
+	for b.Loop() {
+		tasks = tasks[:0]
+
+		// NOTE: send nil buf to dest.ScanFrom in ScanRows to check no buffer perf
+		if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
+			b.Fatal(err)
+		}
+
+		if len(tasks) != taskCount {
+			b.Fatalf("got %d tasks, wanted %d", len(tasks), taskCount)
+		}
+	}
 }
 
 type prepareWrap struct {
