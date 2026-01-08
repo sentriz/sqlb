@@ -43,7 +43,7 @@
 //	subquery := sqlb.NewQuery("SELECT id FROM admins WHERE level > ?", 5)
 //	q.Append("AND id IN (?)", subquery)
 //
-// # CRUD Helpers
+// # Write Mapping
 //
 // [InsertSQL] and [UpdateSQL] generate SQL fragments for types implementing [Insertable] or [Updatable]:
 //

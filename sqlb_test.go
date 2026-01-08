@@ -692,7 +692,7 @@ func BenchmarkStmtCache(b *testing.B) {
 	}
 }
 
-func Example_cRUD() {
+func Example() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
