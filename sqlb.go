@@ -48,7 +48,7 @@
 // [InsertSQL] and [UpdateSQL] generate SQL fragments for types implementing [Insertable] or [Updatable]:
 //
 //	sqlb.ScanRow(ctx, db, &user, "INSERT INTO users ? RETURNING *", sqlb.InsertSQL(user))
-//	sqlb.ScanRow(ctx, db, &user, "UPDATE users SET ? WHERE id = ?", sqlb.UpdateSQL(user), user.ID)
+//	sqlb.ScanRow(ctx, db, &user, "UPDATE users SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(user), user.ID)
 //
 // # Statement Caching
 //
