@@ -259,7 +259,7 @@ func TestScanRowsScanError(t *testing.T) {
 	}
 }
 
-func ExampleIterRows() {
+func ExampleRows() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -269,7 +269,7 @@ func ExampleIterRows() {
 		Task{Name: "bob", Age: 25},
 	))
 
-	for task, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM tasks ORDER BY name") {
+	for task, err := range sqlb.Rows[Task](ctx, db, "SELECT * FROM tasks ORDER BY name") {
 		if err != nil {
 			panic(err)
 		}
@@ -280,12 +280,12 @@ func ExampleIterRows() {
 	// bob 25
 }
 
-func TestIterRowsQueryError(t *testing.T) {
+func TestRowsQueryError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
-	for _, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM nonexistent") {
+	for _, err := range sqlb.Rows[Task](ctx, db, "SELECT * FROM nonexistent") {
 		if err == nil {
 			t.Error("expected error for invalid table")
 		}
@@ -294,14 +294,14 @@ func TestIterRowsQueryError(t *testing.T) {
 	t.Error("expected at least one iteration")
 }
 
-func TestIterRowsScanError(t *testing.T) {
+func TestRowsScanError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
 
-	for _, err := range sqlb.IterRows[Task](ctx, db, "SELECT id, name, age, 'extra' as extra FROM tasks") {
+	for _, err := range sqlb.Rows[Task](ctx, db, "SELECT id, name, age, 'extra' as extra FROM tasks") {
 		if err == nil {
 			t.Error("expected scan error for unknown column")
 		}
@@ -549,7 +549,7 @@ func TestLogScanRows(t *testing.T) {
 	}
 }
 
-func TestLogIterRows(t *testing.T) {
+func TestLogRows(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -561,7 +561,7 @@ func TestLogIterRows(t *testing.T) {
 		logged = true
 	})
 
-	for task, err := range sqlb.IterRows[Task](ctx, db, "SELECT * FROM tasks") {
+	for task, err := range sqlb.Rows[Task](ctx, db, "SELECT * FROM tasks") {
 		if err != nil {
 			t.Fatal(err)
 		}

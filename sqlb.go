@@ -7,20 +7,21 @@
 //
 // These functions execute queries and scan results:
 //
-//   - [ScanRow]: scan first row into dest, returns [sql.ErrNoRows] if empty (scan straight into a [Scannable] type, or use [Values])
-//   - [ScanRows]: scan all rows into dest (use with [Append], [AppendPtr], [AppendValue], [SetValue])
-//   - [IterRows]: lazily iterate over rows
+//   - [ScanRow]: scan first row into dest
+//   - [ScanRows]: scan all rows into dest
+//   - [Rows]: returns an iterator over all rows
+//   - [RowsScan]: returns an iterator with control over scanning
 //   - [Exec]: execute without returning rows
 //
 // # Scannable Helpers
 //
-// These return [Scannable] implementations for use with [ScanRow] and [ScanRows] (though practically, for [ScanRow], only [Values] is useful):
+// These return [Scannable] implementations for use with [ScanRow], [ScanRows], and [RowsScan].
 //
-//   - [Append]: append rows to *[]T (T must implement [Scannable])
-//   - [AppendPtr]: append row pointers to *[]*T (T must implement [Scannable])
-//   - [AppendValue]: append single column values to *[]T (for primitive types)
-//   - [SetValue]: insert single column values into map[T]struct{} (for primitive types)
-//   - [Values]: scan columns into pointers (for primitive types)
+//   - [Append]: append rows to *[]Scannable
+//   - [AppendPtr]: append row pointers to *[]*Scannable
+//   - [AppendValue]: for primitives, append single column values to *[]P
+//   - [SetValue]: for primitives, insert single column values into map[P]struct{}
+//   - [Values]: for primitives, scan columns into pointers
 //
 // # Code Generation
 //
@@ -163,13 +164,13 @@ type SQLer interface {
 	SQL() (string, []any)
 }
 
-// Updatable represents a struct that can produce values for updates.
+// Updatable represents a type that can provide column values for updates.
 type Updatable interface {
 	IsGenerated(column string) bool
 	Values() []sql.NamedArg
 }
 
-// UpdateSQL builds a [SQLer] representing the update for the [Updatable].
+// UpdateSQL builds a [SQLer] representing an UPDATE for an [Updatable] item.
 // Generated columns (where [Updatable.IsGenerated] returns true) are skipped.
 func UpdateSQL(item Updatable) SQLer {
 	var set bool
@@ -188,7 +189,7 @@ func UpdateSQL(item Updatable) SQLer {
 	return b
 }
 
-// Insertable represents a struct that can provide values for insertion.
+// Insertable represents a type that can provide column values for insertion.
 type Insertable interface {
 	IsGenerated(column string) bool
 	Values() []sql.NamedArg
@@ -196,6 +197,7 @@ type Insertable interface {
 
 // InsertSQL builds a [SQLer] representing an INSERT for one or more [Insertable] items.
 // Generated columns (where [Insertable.IsGenerated] returns true) are skipped.
+// Panics if called with zero items.
 func InsertSQL[T Insertable](items ...T) SQLer {
 	if len(items) == 0 {
 		panic("InsertSQL called with zero arguments")
@@ -251,26 +253,26 @@ func InSQL[T any](items ...T) SQLer {
 	return NewQuery(rowPlaceholder, values...)
 }
 
-// Scannable represents a value that can be scanned from a row.
+// Scannable represents a type that can scan itself from a row.
 type Scannable interface {
 	ScanFrom(columns []string, rows *sql.Rows, buf []any) error
 }
 
-// ScannablePtr is a constraint for pointer types that implement [Scannable].
-// It allows sqlb to allocate a new T and scan its *T.
-// It should not be used directly, since Go will infer it from the first type argument in [IterRows], [AppendPtr], and [Append].
+// ScannablePtr is a constraint for pointer types that implement [Scannable], allowing allocation of a new T and scan into *T.
+// NOTE: It should not be used directly, since Go will infer it from destination arguments.
 type ScannablePtr[T any] interface {
 	Scannable
 	*T
 }
 
-// ScanDB is an interface compatible with [*sql.DB] or [*sql.Tx] for queries.
+// ScanDB is an interface compatible with [*sql.DB] or [*sql.Tx] for querying rows.
 type ScanDB interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// ScanRow executes the query and scans the first row into dest.
-// Returns [sql.ErrNoRows] if no result is found.
+// ScanRow executes the query and scans the first row into dest, which is typically
+// a native [Scannable] type or one created with a [Scannable] helper such as [Values].
+// Returns [sql.ErrNoRows] if no rows are found.
 func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
@@ -300,7 +302,8 @@ func ScanRow(ctx context.Context, db ScanDB, dest Scannable, query string, args 
 	return nil
 }
 
-// ScanRows executes the query and scans all rows into the single dest. To be used with [Append], [AppendPtr], [AppendValue], [SetValue], or [Values].
+// ScanRows executes the query and scans all rows into dest, which is typically
+// a native [Scannable] type or one created with a [Scannable] helper like [Append].
 func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
@@ -328,9 +331,9 @@ func ScanRows(ctx context.Context, db ScanDB, dest Scannable, query string, args
 	return rows.Err()
 }
 
-// IterRows returns a pull-based iterator ([iter.Seq2]) over query results.
+// Rows returns an iterator over query results, allocating a new T per row.
 // T must implement [Scannable] via its pointer type.
-func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
+func Rows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
@@ -375,6 +378,48 @@ func IterRows[T any, pT ScannablePtr[T]](ctx context.Context, db ScanDB, query s
 	}
 }
 
+// RowsScan returns an iterator that scans each row into dest.
+// Unlike [Rows], it reuses the same dest each iteration, suitable for use with [Scannable] helpers like [Values].
+func RowsScan(ctx context.Context, db ScanDB, dest Scannable, query string, args ...any) iter.Seq[error] {
+	return func(yield func(error) bool) {
+		query, args = NewQuery(query, args...).SQL()
+
+		if lf := logFunc(ctx); lf != nil {
+			defer log(ctx, lf, "query", query)()
+		}
+
+		rows, err := db.QueryContext(ctx, query, args...)
+		if err != nil {
+			yield(err)
+			return
+		}
+		defer rows.Close()
+
+		columns, err := rows.Columns()
+		if err != nil {
+			yield(err)
+			return
+		}
+
+		buf := make([]any, 0, len(columns))
+		for rows.Next() {
+			if err := dest.ScanFrom(columns, rows, buf[:0]); err != nil {
+				if !yield(err) {
+					return
+				}
+				continue
+			}
+			if !yield(nil) {
+				return
+			}
+		}
+		if err := rows.Err(); err != nil {
+			yield(err)
+			return
+		}
+	}
+}
+
 // ExecDB is an interface compatible with [*sql.DB] or [*sql.Tx] for executing queries.
 type ExecDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -392,8 +437,7 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	return err
 }
 
-// Append returns a [Scannable] that appends rows to dest.
-// T must implement [Scannable].
+// Append returns a [Scannable] that appends each row to dest.
 func Append[T any, pT ScannablePtr[T]](dest *[]T) Scannable {
 	return scanAppend[T, pT]{dest}
 }
@@ -411,8 +455,7 @@ func (p scanAppend[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any)
 	return nil
 }
 
-// AppendPtr returns a [Scannable] that appends row pointers to dest.
-// T must implement [Scannable].
+// AppendPtr returns a [Scannable] that appends a pointer to each row to dest.
 func AppendPtr[T any, pT ScannablePtr[T]](dest *[]*T) Scannable {
 	return scanAppendPtr[T, pT]{dest}
 }
@@ -431,7 +474,7 @@ func (p scanAppendPtr[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []a
 }
 
 // Values returns a [Scannable] that scans columns into the provided pointers.
-// For use with primitive types.
+// For primitive types that don't need a full [Scannable] implementation.
 func Values(dests ...any) Scannable {
 	return scanValues(dests)
 }
@@ -442,8 +485,8 @@ func (p scanValues) ScanFrom(columns []string, rows *sql.Rows, buf []any) error 
 	return rows.Scan(p...)
 }
 
-// AppendValue returns a [Scannable] that appends a single column value to dest.
-// For use with primitive types.
+// AppendValue returns a [Scannable] that appends a single column value to dest per row.
+// For primitive types that don't need a full [Scannable] implementation.
 func AppendValue[T any](s *[]T) Scannable {
 	return (*scanAppendValue[T])(s)
 }
@@ -459,8 +502,8 @@ func (p *scanAppendValue[T]) ScanFrom(columns []string, rows *sql.Rows, buf []an
 	return nil
 }
 
-// SetValue returns a [Scannable] that inserts a single column value into dest.
-// For use with primitive types.
+// SetValue returns a [Scannable] that inserts a single column value into dest per row.
+// For primitive types that don't need a full [Scannable] implementation.
 func SetValue[T comparable](s map[T]struct{}) Scannable {
 	return (scanSet[T])(s)
 }
