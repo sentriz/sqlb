@@ -412,6 +412,28 @@ func ExampleSetValue() {
 	// 2
 }
 
+func ExampleMapValue() {
+	ctx := context.Background()
+	db := newDB(ctx)
+	defer db.Close()
+
+	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(
+		Task{Name: "alice", Age: 30},
+		Task{Name: "bob", Age: 25},
+		Task{Name: "carol", Age: 40},
+	))
+
+	ages := make(map[string]int)
+	if err := sqlb.ScanRows(ctx, db, sqlb.MapValue(ages), "SELECT name, age FROM tasks"); err != nil {
+		panic(err)
+	}
+	fmt.Println(ages["alice"])
+	fmt.Println(ages["bob"])
+	// Output:
+	// 30
+	// 25
+}
+
 func ExampleJSON() {
 	ctx := context.Background()
 	db, _ := sql.Open("sqlite3", ":memory:")

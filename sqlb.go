@@ -21,6 +21,7 @@
 //   - [AppendPtr]: append row pointers to *[]*Scannable
 //   - [AppendValue]: for primitives, append single column values to *[]P
 //   - [SetValue]: for primitives, insert single column values into map[P]struct{}
+//   - [MapValue]: for primitives, insert two column values into map[K]V
 //   - [Values]: for primitives, scan columns into pointers
 //
 // # Code Generation
@@ -516,6 +517,24 @@ func (p scanSet[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error 
 		return err
 	}
 	p[v] = struct{}{}
+	return nil
+}
+
+// MapValue returns a [Scannable] that scans two columns into dest as key-value pairs per row.
+// For primitive types that don't need a full [Scannable] implementation.
+func MapValue[K comparable, V any](m map[K]V) Scannable {
+	return scanMap[K, V](m)
+}
+
+type scanMap[K comparable, V any] map[K]V
+
+func (p scanMap[K, V]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+	var k K
+	var v V
+	if err := rows.Scan(&k, &v); err != nil {
+		return err
+	}
+	p[k] = v
 	return nil
 }
 
