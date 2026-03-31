@@ -8,7 +8,7 @@ import (
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"sqlb": main,
+		"sqlbgen": main,
 	})
 }
 
