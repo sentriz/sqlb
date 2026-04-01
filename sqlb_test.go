@@ -108,7 +108,7 @@ func ExampleInsertSQL() {
 	defer db.Close()
 
 	task := Task{Name: "alice", Age: 30}
-	if err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
+	if err := sqlb.QueryRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
 		panic(err)
 	}
 	fmt.Println(task.ID, task.Name, task.Age)
@@ -169,7 +169,7 @@ func TestInSQLPanic(t *testing.T) {
 	sqlb.InSQL[int]()
 }
 
-func ExampleScanRow() {
+func ExampleQueryRow() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -177,7 +177,7 @@ func ExampleScanRow() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "alice", Age: 30}))
 
 	var task Task
-	if err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice"); err != nil {
 		panic(err)
 	}
 	fmt.Println(task.Name, task.Age)
@@ -185,31 +185,31 @@ func ExampleScanRow() {
 	// alice 30
 }
 
-func TestScanRowNoRows(t *testing.T) {
+func TestQueryRowNoRows(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var task Task
-	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM tasks WHERE id = ?", 999)
+	err := sqlb.QueryRow(ctx, db, &task, "SELECT * FROM tasks WHERE id = ?", 999)
 	if err != sql.ErrNoRows {
 		t.Errorf("got %v, want sql.ErrNoRows", err)
 	}
 }
 
-func TestScanRowQueryError(t *testing.T) {
+func TestQueryRowQueryError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var task Task
-	err := sqlb.ScanRow(ctx, db, &task, "SELECT * FROM nonexistent")
+	err := sqlb.QueryRow(ctx, db, &task, "SELECT * FROM nonexistent")
 	if err == nil {
 		t.Error("expected error for invalid table")
 	}
 }
 
-func ExampleScanRows() {
+func ExampleQueryRows() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -221,7 +221,7 @@ func ExampleScanRows() {
 	))
 
 	var tasks []Task
-	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name"); err != nil {
 		panic(err)
 	}
 	for _, t := range tasks {
@@ -233,19 +233,19 @@ func ExampleScanRows() {
 	// carol 35
 }
 
-func TestScanRowsQueryError(t *testing.T) {
+func TestQueryRowsQueryError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var tasks []Task
-	err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM nonexistent")
+	err := sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM nonexistent")
 	if err == nil {
 		t.Error("expected error for invalid table")
 	}
 }
 
-func TestScanRowsScanError(t *testing.T) {
+func TestQueryRowsScanError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -253,7 +253,7 @@ func TestScanRowsScanError(t *testing.T) {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
 
 	var names []string
-	err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT id, name FROM tasks")
+	err := sqlb.QueryRows(ctx, db, sqlb.ValueAppend(&names), "SELECT id, name FROM tasks")
 	if err == nil {
 		t.Error("expected scan error for wrong column count")
 	}
@@ -294,7 +294,7 @@ func TestRowsQueryError(t *testing.T) {
 	t.Error("expected at least one iteration")
 }
 
-func TestRowsScanError(t *testing.T) {
+func TestRowsError(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -330,7 +330,7 @@ func ExampleAppend() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
 
 	var tasks []Task
-	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(tasks))
@@ -348,7 +348,7 @@ func ExampleAppendPtr() {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}, Task{Name: "two"}))
 
 	var tasks []*Task
-	if err := sqlb.ScanRows(ctx, db, sqlb.AppendPtr(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.AppendPtr(&tasks), "SELECT * FROM tasks ORDER BY id"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(tasks))
@@ -358,13 +358,13 @@ func ExampleAppendPtr() {
 	// one
 }
 
-func ExampleValues() {
+func ExampleInto() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var x, y int
-	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&x, &y), "SELECT 10, 20"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&x, &y), "SELECT 10, 20"); err != nil {
 		panic(err)
 	}
 	fmt.Println(x, y)
@@ -372,7 +372,7 @@ func ExampleValues() {
 	// 10 20
 }
 
-func ExampleAppendValue() {
+func ExampleValueAppend() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -384,7 +384,7 @@ func ExampleAppendValue() {
 	))
 
 	var names []string
-	if err := sqlb.ScanRows(ctx, db, sqlb.AppendValue(&names), "SELECT name FROM tasks ORDER BY name"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.ValueAppend(&names), "SELECT name FROM tasks ORDER BY name"); err != nil {
 		panic(err)
 	}
 	fmt.Println(names)
@@ -392,7 +392,7 @@ func ExampleAppendValue() {
 	// [alice bob carol]
 }
 
-func ExampleSetValue() {
+func ExampleValueSet() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -404,7 +404,7 @@ func ExampleSetValue() {
 	))
 
 	names := make(map[string]struct{})
-	if err := sqlb.ScanRows(ctx, db, sqlb.SetValue(names), "SELECT name FROM tasks"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.ValueSet(names), "SELECT name FROM tasks"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(names))
@@ -412,7 +412,7 @@ func ExampleSetValue() {
 	// 2
 }
 
-func ExampleMapValue() {
+func ExampleValueMap() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -424,7 +424,7 @@ func ExampleMapValue() {
 	))
 
 	ages := make(map[string]int)
-	if err := sqlb.ScanRows(ctx, db, sqlb.MapValue(ages), "SELECT name, age FROM tasks"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.ValueMap(ages), "SELECT name, age FROM tasks"); err != nil {
 		panic(err)
 	}
 	fmt.Println(ages["alice"])
@@ -444,7 +444,7 @@ func ExampleJSON() {
 	_ = sqlb.Exec(ctx, db, `INSERT INTO config (data) VALUES (?)`, config)
 
 	var data sqlb.JSON[map[string]string]
-	_ = sqlb.ScanRow(ctx, db, sqlb.Values(&data), "SELECT data FROM config LIMIT 1")
+	_ = sqlb.QueryRow(ctx, db, sqlb.Into(&data), "SELECT data FROM config LIMIT 1")
 	fmt.Println(data.Data["theme"])
 	// Output:
 	// dark
@@ -458,7 +458,7 @@ func TestJSONScanNull(t *testing.T) {
 	_ = sqlb.Exec(ctx, db, `INSERT INTO books (details) VALUES (NULL)`)
 
 	var data sqlb.JSON[map[string]any]
-	err := sqlb.ScanRow(ctx, db, sqlb.Values(&data), "SELECT details FROM books LIMIT 1")
+	err := sqlb.QueryRow(ctx, db, sqlb.Into(&data), "SELECT details FROM books LIMIT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -497,7 +497,7 @@ func ExampleWithLogFunc() {
 	})
 
 	var x int
-	_ = sqlb.ScanRow(ctx, db, sqlb.Values(&x), "SELECT 42")
+	_ = sqlb.QueryRow(ctx, db, sqlb.Into(&x), "SELECT 42")
 	// Output:
 	// type=query query=SELECT 42
 }
@@ -518,7 +518,7 @@ func TestLog(t *testing.T) {
 	})
 
 	var one int
-	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&one), "select 1"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&one), "select 1"); err != nil {
 		t.Fatal(err)
 	}
 	if one != 1 {
@@ -530,7 +530,7 @@ func TestLog(t *testing.T) {
 	}
 
 	var two int
-	if err := sqlb.ScanRow(ctx, db, sqlb.Values(&two), "select 2"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&two), "select 2"); err != nil {
 		t.Fatal(err)
 	}
 	if two != 2 {
@@ -552,7 +552,7 @@ func TestLog(t *testing.T) {
 	}
 }
 
-func TestLogScanRows(t *testing.T) {
+func TestLogQueryRows(t *testing.T) {
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -563,7 +563,7 @@ func TestLogScanRows(t *testing.T) {
 	})
 
 	var tasks []Task
-	if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
 		t.Fatal(err)
 	}
 	if !logged {
@@ -603,8 +603,8 @@ func ExampleStmtCache() {
 	defer cache.Close()
 
 	var x int
-	_ = sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "SELECT 1")
-	_ = sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "SELECT 1") // uses cached statement
+	_ = sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "SELECT 1")
+	_ = sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "SELECT 1") // uses cached statement
 	fmt.Println(x)
 	// Output:
 	// 1
@@ -621,7 +621,7 @@ func TestStmtCache(t *testing.T) {
 	}})
 
 	var one int
-	if err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1); err != nil {
+	if err := sqlb.QueryRow(ctx, cdb, sqlb.Into(&one), "select 1 where ?", 1); err != nil {
 		t.Fatal(err)
 	}
 	if one != 1 {
@@ -631,7 +631,7 @@ func TestStmtCache(t *testing.T) {
 		t.Errorf("got %d prepareCalls, want 1", prepareCalls)
 	}
 
-	if err := sqlb.ScanRow(ctx, cdb, sqlb.Values(&one), "select 1 where ?", 1); err != nil {
+	if err := sqlb.QueryRow(ctx, cdb, sqlb.Into(&one), "select 1 where ?", 1); err != nil {
 		t.Fatal(err)
 	}
 	if prepareCalls != 1 {
@@ -673,7 +673,7 @@ func TestStmtCachePrepareError(t *testing.T) {
 	defer cache.Close()
 
 	var x int
-	if err := sqlb.ScanRow(ctx, cache, sqlb.Values(&x), "INVALID SQL"); err == nil {
+	if err := sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "INVALID SQL"); err == nil {
 		t.Error("expected error for invalid SQL")
 	}
 
@@ -720,19 +720,19 @@ func Example() {
 	defer db.Close()
 
 	task := Task{Name: "alice", Age: 30}
-	if err := sqlb.ScanRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
+	if err := sqlb.QueryRow(ctx, db, &task, "INSERT INTO tasks ? RETURNING *", sqlb.InsertSQL(task)); err != nil {
 		panic(err)
 	}
 	fmt.Println("inserted:", task.ID, task.Name, task.Age)
 
 	task.Age = 31
-	if err := sqlb.ScanRow(ctx, db, &task, "UPDATE tasks SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(task), task.ID); err != nil {
+	if err := sqlb.QueryRow(ctx, db, &task, "UPDATE tasks SET ? WHERE id = ? RETURNING *", sqlb.UpdateSQL(task), task.ID); err != nil {
 		panic(err)
 	}
 	fmt.Println("updated:", task.ID, task.Name, task.Age)
 
 	var readTask Task
-	if err := sqlb.ScanRow(ctx, db, &readTask, "SELECT * FROM tasks WHERE id = ?", task.ID); err != nil {
+	if err := sqlb.QueryRow(ctx, db, &readTask, "SELECT * FROM tasks WHERE id = ?", task.ID); err != nil {
 		panic(err)
 	}
 	fmt.Println("read:", readTask.ID, readTask.Name, readTask.Age)
@@ -763,8 +763,8 @@ func BenchmarkScanBuffer(b *testing.B) {
 	for b.Loop() {
 		tasks = tasks[:0]
 
-		// NOTE: send nil buf to dest.ScanFrom in ScanRows to check no buffer perf
-		if err := sqlb.ScanRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
+		// NOTE: send nil buf to dest.ScanFrom in QueryRows to check no buffer perf
+		if err := sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks"); err != nil {
 			b.Fatal(err)
 		}
 
