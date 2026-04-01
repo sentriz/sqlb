@@ -150,14 +150,14 @@ func writeType(w io.Writer, tc typeConfig, fields []string) {
 	fmt.Fprintf(w, "}\n")
 
 	fmt.Fprintf(w, "\nfunc (%s *%s) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {\n", r, tc.name)
-	fmt.Fprintf(w, "\tfor _, c := range columns {\n")
-	fmt.Fprintf(w, "\t\tswitch c {\n")
+	fmt.Fprintf(w, "\tfor _, col := range columns {\n")
+	fmt.Fprintf(w, "\t\tswitch col {\n")
 	for _, f := range fields {
 		fmt.Fprintf(w, "\t\tcase \"%s\":\n", toSnake(f))
 		fmt.Fprintf(w, "\t\t\tbuf = append(buf, &%s.%s)\n", r, f)
 	}
 	fmt.Fprintf(w, "\t\tdefault:\n")
-	fmt.Fprintf(w, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", c)\n")
+	fmt.Fprintf(w, "\t\t\treturn fmt.Errorf(\"unknown column name %%q\", col)\n")
 	fmt.Fprintf(w, "\t\t}\n")
 	fmt.Fprintf(w, "\t}\n")
 	fmt.Fprintf(w, "\treturn rows.Scan(buf...)\n")
