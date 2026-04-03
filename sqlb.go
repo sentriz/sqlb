@@ -26,6 +26,16 @@
 // Or implement [Dest] yourself for full control. [Dest] implementations can also be generated
 // by the companion tool `sqlbgen`.
 //
+//	var task Task
+//	sqlb.QueryRow(ctx, db, &task, "SELECT * FROM tasks WHERE name = ?", "alice")
+//
+//	var tasks []Task
+//	sqlb.QueryRows(ctx, db, sqlb.Append(&tasks), "SELECT * FROM tasks ORDER BY name")
+//
+//	for task, err := range sqlb.Rows[Task](ctx, db, "SELECT * FROM tasks ORDER BY name") {
+//	    // ...
+//	}
+//
 // # Writing rows
 //
 // [InsertSQL] and [UpdateSQL] generate [SQLer] fragments for types implementing [Insertable] or [Updatable]:
