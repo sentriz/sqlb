@@ -252,7 +252,7 @@ func TestQueryRowsScanError(t *testing.T) {
 	_ = sqlb.Exec(ctx, db, "INSERT INTO tasks ?", sqlb.InsertSQL(Task{Name: "one"}))
 
 	var names []string
-	err := sqlb.QueryRows(ctx, db, sqlb.ValueAppend(&names), "SELECT id, name FROM tasks")
+	err := sqlb.QueryRows(ctx, db, sqlb.AppendValue(&names), "SELECT id, name FROM tasks")
 	if err == nil {
 		t.Error("expected scan error for wrong column count")
 	}
@@ -357,13 +357,13 @@ func ExampleAppendPtr() {
 	// one
 }
 
-func ExampleInto() {
+func ExampleScan() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var x, y int
-	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&x, &y), "SELECT 10, 20"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Scan(&x, &y), "SELECT 10, 20"); err != nil {
 		panic(err)
 	}
 	fmt.Println(x, y)
@@ -371,7 +371,7 @@ func ExampleInto() {
 	// 10 20
 }
 
-func ExampleValueAppend() {
+func ExampleAppendValue() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -383,7 +383,7 @@ func ExampleValueAppend() {
 	))
 
 	var names []string
-	if err := sqlb.QueryRows(ctx, db, sqlb.ValueAppend(&names), "SELECT name FROM tasks ORDER BY name"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.AppendValue(&names), "SELECT name FROM tasks ORDER BY name"); err != nil {
 		panic(err)
 	}
 	fmt.Println(names)
@@ -391,7 +391,7 @@ func ExampleValueAppend() {
 	// [alice bob carol]
 }
 
-func ExampleValueSet() {
+func ExampleSetValue() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -403,7 +403,7 @@ func ExampleValueSet() {
 	))
 
 	names := make(map[string]struct{})
-	if err := sqlb.QueryRows(ctx, db, sqlb.ValueSet(names), "SELECT name FROM tasks"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.SetValue(names), "SELECT name FROM tasks"); err != nil {
 		panic(err)
 	}
 	fmt.Println(len(names))
@@ -411,7 +411,7 @@ func ExampleValueSet() {
 	// 2
 }
 
-func ExampleValueMap() {
+func ExampleMapValues() {
 	ctx := context.Background()
 	db := newDB(ctx)
 	defer db.Close()
@@ -423,7 +423,7 @@ func ExampleValueMap() {
 	))
 
 	ages := make(map[string]int)
-	if err := sqlb.QueryRows(ctx, db, sqlb.ValueMap(ages), "SELECT name, age FROM tasks"); err != nil {
+	if err := sqlb.QueryRows(ctx, db, sqlb.MapValues(ages), "SELECT name, age FROM tasks"); err != nil {
 		panic(err)
 	}
 	fmt.Println(ages["alice"])
@@ -443,7 +443,7 @@ func ExampleJSON() {
 	_ = sqlb.Exec(ctx, db, `INSERT INTO config (data) VALUES (?)`, config)
 
 	var data sqlb.JSON[map[string]string]
-	_ = sqlb.QueryRow(ctx, db, sqlb.Into(&data), "SELECT data FROM config LIMIT 1")
+	_ = sqlb.QueryRow(ctx, db, sqlb.Scan(&data), "SELECT data FROM config LIMIT 1")
 	fmt.Println(data.Data["theme"])
 	// Output:
 	// dark
@@ -457,7 +457,7 @@ func TestJSONScanNull(t *testing.T) {
 	_ = sqlb.Exec(ctx, db, `INSERT INTO books (details) VALUES (NULL)`)
 
 	var data sqlb.JSON[map[string]any]
-	err := sqlb.QueryRow(ctx, db, sqlb.Into(&data), "SELECT details FROM books LIMIT 1")
+	err := sqlb.QueryRow(ctx, db, sqlb.Scan(&data), "SELECT details FROM books LIMIT 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +496,7 @@ func ExampleWithLogFunc() {
 	})
 
 	var x int
-	_ = sqlb.QueryRow(ctx, db, sqlb.Into(&x), "SELECT 42")
+	_ = sqlb.QueryRow(ctx, db, sqlb.Scan(&x), "SELECT 42")
 	// Output:
 	// type=query query=SELECT 42
 }
@@ -517,7 +517,7 @@ func TestLog(t *testing.T) {
 	})
 
 	var one int
-	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&one), "select 1"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Scan(&one), "select 1"); err != nil {
 		t.Fatal(err)
 	}
 	if one != 1 {
@@ -529,7 +529,7 @@ func TestLog(t *testing.T) {
 	}
 
 	var two int
-	if err := sqlb.QueryRow(ctx, db, sqlb.Into(&two), "select 2"); err != nil {
+	if err := sqlb.QueryRow(ctx, db, sqlb.Scan(&two), "select 2"); err != nil {
 		t.Fatal(err)
 	}
 	if two != 2 {
@@ -602,8 +602,8 @@ func ExampleStmtCache() {
 	defer cache.Close()
 
 	var x int
-	_ = sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "SELECT 1")
-	_ = sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "SELECT 1") // uses cached statement
+	_ = sqlb.QueryRow(ctx, cache, sqlb.Scan(&x), "SELECT 1")
+	_ = sqlb.QueryRow(ctx, cache, sqlb.Scan(&x), "SELECT 1") // uses cached statement
 	fmt.Println(x)
 	// Output:
 	// 1
@@ -620,7 +620,7 @@ func TestStmtCache(t *testing.T) {
 	}})
 
 	var one int
-	if err := sqlb.QueryRow(ctx, cdb, sqlb.Into(&one), "select 1 where ?", 1); err != nil {
+	if err := sqlb.QueryRow(ctx, cdb, sqlb.Scan(&one), "select 1 where ?", 1); err != nil {
 		t.Fatal(err)
 	}
 	if one != 1 {
@@ -630,7 +630,7 @@ func TestStmtCache(t *testing.T) {
 		t.Errorf("got %d prepareCalls, want 1", prepareCalls)
 	}
 
-	if err := sqlb.QueryRow(ctx, cdb, sqlb.Into(&one), "select 1 where ?", 1); err != nil {
+	if err := sqlb.QueryRow(ctx, cdb, sqlb.Scan(&one), "select 1 where ?", 1); err != nil {
 		t.Fatal(err)
 	}
 	if prepareCalls != 1 {
@@ -672,7 +672,7 @@ func TestStmtCachePrepareError(t *testing.T) {
 	defer cache.Close()
 
 	var x int
-	if err := sqlb.QueryRow(ctx, cache, sqlb.Into(&x), "INVALID SQL"); err == nil {
+	if err := sqlb.QueryRow(ctx, cache, sqlb.Scan(&x), "INVALID SQL"); err == nil {
 		t.Error("expected error for invalid SQL")
 	}
 

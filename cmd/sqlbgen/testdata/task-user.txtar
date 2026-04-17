@@ -43,8 +43,8 @@ func (t Task) Values() []sql.NamedArg {
 }
 
 func (t *Task) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
-	for _, c := range columns {
-		switch c {
+	for _, col := range columns {
+		switch col {
 		case "id":
 			buf = append(buf, &t.ID)
 		case "name":
@@ -54,7 +54,7 @@ func (t *Task) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 		case "user_id":
 			buf = append(buf, &t.UserID)
 		default:
-			return fmt.Errorf("unknown column name %q", c)
+			return fmt.Errorf("unknown column name %q", col)
 		}
 	}
 	return rows.Scan(buf...)

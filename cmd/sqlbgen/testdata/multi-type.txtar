@@ -46,14 +46,14 @@ func (t Task) Values() []sql.NamedArg {
 }
 
 func (t *Task) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
-	for _, c := range columns {
-		switch c {
+	for _, col := range columns {
+		switch col {
 		case "id":
 			buf = append(buf, &t.ID)
 		case "name":
 			buf = append(buf, &t.Name)
 		default:
-			return fmt.Errorf("unknown column name %q", c)
+			return fmt.Errorf("unknown column name %q", col)
 		}
 	}
 	return rows.Scan(buf...)
@@ -74,14 +74,14 @@ func (e Event) Values() []sql.NamedArg {
 }
 
 func (e *Event) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
-	for _, c := range columns {
-		switch c {
+	for _, col := range columns {
+		switch col {
 		case "timestamp":
 			buf = append(buf, &e.Timestamp)
 		case "data":
 			buf = append(buf, &e.Data)
 		default:
-			return fmt.Errorf("unknown column name %q", c)
+			return fmt.Errorf("unknown column name %q", col)
 		}
 	}
 	return rows.Scan(buf...)

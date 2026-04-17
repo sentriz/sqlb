@@ -1,12 +1,12 @@
 // Package sqlb provides lightweight, type-safe, and reflection-free helpers for [database/sql].
 //
 // sqlb tries to make few assumptions about how you write queries or read results.
-// [Dest] and [SQLer] interfaces can be implemented to help you extend the library.
+// [Scanner] and [SQLer] interfaces can be implemented to help you extend the library.
 // Built-in implementations are provided to cover common cases.
 //
 // # Reading rows
 //
-// Query functions execute queries and read results into a [Dest]:
+// Query functions execute queries and read results into a [Scanner]:
 //
 //   - [QueryRow]: read first row into dest
 //   - [QueryRows]: read all rows into dest
@@ -14,16 +14,16 @@
 //   - [Each]: returns an iterator with control over reading
 //   - [Exec]: execute without returning rows
 //
-// A [Dest] controls how rows are read. Built-in helpers cover common patterns:
+// A [Scanner] controls how rows are read. Built-in helpers cover common patterns:
 //
-//   - [Append]: append rows to *[]Dest
-//   - [AppendPtr]: append row pointers to *[]*Dest
-//   - [ValueAppend]: for primitives, append single column values to *[]P
-//   - [ValueSet]: for primitives, insert single column values into map[P]struct{}
-//   - [ValueMap]: for primitives, insert two column values into map[K]V
-//   - [Into]: for primitives, read columns into pointers
+//   - [Append]: append rows to *[]T
+//   - [AppendPtr]: append row pointers to *[]*T
+//   - [AppendValue]: for primitives, append single column values to *[]P
+//   - [SetValue]: for primitives, insert single column values into map[P]struct{}
+//   - [MapValues]: for primitives, insert two column values into map[K]V
+//   - [Scan]: for primitives, read columns into pointers
 //
-// Or implement [Dest] yourself for full control. [Dest] implementations can also be generated
+// Or implement [Scanner] yourself for full control. [Scanner] implementations can also be generated
 // by the companion tool `sqlbgen`.
 //
 //	var task Task
@@ -63,7 +63,7 @@
 //
 // # Code generation
 //
-// Use sqlbgen to generate [Dest], [Insertable], and [Updatable] implementations:
+// Use sqlbgen to generate [Scanner], [Insertable], and [Updatable] implementations:
 //
 //	//go:generate go tool sqlbgen type User generated ID -- user.gen.go
 //
@@ -269,15 +269,15 @@ func InSQL[T any](items ...T) SQLer {
 	return NewQuery(rowPlaceholder, values...)
 }
 
-// Dest represents a type that can read itself from a row.
-type Dest interface {
+// Scanner represents a type that can read itself from a row.
+type Scanner interface {
 	ScanFrom(columns []string, rows *sql.Rows, buf []any) error
 }
 
-// DestPtr is a constraint for pointer types that implement [Dest], allowing allocation of a new T and read into *T.
+// ScannerPtr is a constraint for pointer types that implement [Scanner], allowing allocation of a new T and read into *T.
 // NOTE: It should not be used directly, since Go will infer it from destination arguments.
-type DestPtr[T any] interface {
-	Dest
+type ScannerPtr[T any] interface {
+	Scanner
 	*T
 }
 
@@ -287,9 +287,9 @@ type QueryDB interface {
 }
 
 // QueryRow executes the query and reads the first row into dest, which is typically
-// a native [Dest] type or one created with a [Dest] helper such as [Into].
+// a native [Scanner] type or one created with a [Scanner] helper such as [Scan].
 // Returns [sql.ErrNoRows] if no rows are found.
-func QueryRow(ctx context.Context, db QueryDB, dest Dest, query string, args ...any) error {
+func QueryRow(ctx context.Context, db QueryDB, dest Scanner, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	if lf := logFunc(ctx); lf != nil {
@@ -319,8 +319,8 @@ func QueryRow(ctx context.Context, db QueryDB, dest Dest, query string, args ...
 }
 
 // QueryRows executes the query and reads all rows into dest, which is typically
-// a native [Dest] type or one created with a [Dest] helper like [Append].
-func QueryRows(ctx context.Context, db QueryDB, dest Dest, query string, args ...any) error {
+// a native [Scanner] type or one created with a [Scanner] helper like [Append].
+func QueryRows(ctx context.Context, db QueryDB, dest Scanner, query string, args ...any) error {
 	query, args = NewQuery(query, args...).SQL()
 
 	if lf := logFunc(ctx); lf != nil {
@@ -348,8 +348,8 @@ func QueryRows(ctx context.Context, db QueryDB, dest Dest, query string, args ..
 }
 
 // Rows returns an iterator over query results, allocating a new T per row.
-// T must implement [Dest] via its pointer type.
-func Rows[T any, pT DestPtr[T]](ctx context.Context, db QueryDB, query string, args ...any) iter.Seq2[T, error] {
+// T must implement [Scanner] via its pointer type.
+func Rows[T any, pT ScannerPtr[T]](ctx context.Context, db QueryDB, query string, args ...any) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
@@ -395,8 +395,8 @@ func Rows[T any, pT DestPtr[T]](ctx context.Context, db QueryDB, query string, a
 }
 
 // Each returns an iterator that reads each row into dest.
-// Unlike [Rows], it reuses the same dest each iteration, suitable for use with [Dest] helpers like [Into].
-func Each(ctx context.Context, db QueryDB, dest Dest, query string, args ...any) iter.Seq[error] {
+// Unlike [Rows], it reuses the same dest each iteration, suitable for use with [Scanner] helpers like [Scan].
+func Each(ctx context.Context, db QueryDB, dest Scanner, query string, args ...any) iter.Seq[error] {
 	return func(yield func(error) bool) {
 		query, args = NewQuery(query, args...).SQL()
 
@@ -453,16 +453,16 @@ func Exec(ctx context.Context, db ExecDB, query string, args ...any) error {
 	return err
 }
 
-// Append returns a [Dest] that appends each row to dest.
-func Append[T any, pT DestPtr[T]](dest *[]T) Dest {
-	return destAppend[T, pT]{dest}
+// Append returns a [Scanner] that appends each row to dest.
+func Append[T any, pT ScannerPtr[T]](dest *[]T) Scanner {
+	return scannerAppend[T, pT]{dest}
 }
 
-type destAppend[T any, pT DestPtr[T]] struct {
+type scannerAppend[T any, pT ScannerPtr[T]] struct {
 	s *[]T
 }
 
-func (p destAppend[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p scannerAppend[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var t T
 	if err := pT(&t).ScanFrom(columns, rows, buf); err != nil {
 		return err
@@ -471,16 +471,16 @@ func (p destAppend[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any)
 	return nil
 }
 
-// AppendPtr returns a [Dest] that appends a pointer to each row to dest.
-func AppendPtr[T any, pT DestPtr[T]](dest *[]*T) Dest {
-	return destAppendPtr[T, pT]{dest}
+// AppendPtr returns a [Scanner] that appends a pointer to each row to dest.
+func AppendPtr[T any, pT ScannerPtr[T]](dest *[]*T) Scanner {
+	return scannerAppendPtr[T, pT]{dest}
 }
 
-type destAppendPtr[T any, pT DestPtr[T]] struct {
+type scannerAppendPtr[T any, pT ScannerPtr[T]] struct {
 	s *[]*T
 }
 
-func (p destAppendPtr[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p scannerAppendPtr[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var t T
 	if err := pT(&t).ScanFrom(columns, rows, buf); err != nil {
 		return err
@@ -489,27 +489,27 @@ func (p destAppendPtr[T, pT]) ScanFrom(columns []string, rows *sql.Rows, buf []a
 	return nil
 }
 
-// Into returns a [Dest] that reads columns into the provided pointers.
-// For primitive types that don't need a full [Dest] implementation.
-func Into(dests ...any) Dest {
-	return destValues(dests)
+// Scan returns a [Scanner] that reads columns into the provided pointers.
+// For primitive types that don't need a full [Scanner] implementation.
+func Scan(dests ...any) Scanner {
+	return scannerScan(dests)
 }
 
-type destValues []any
+type scannerScan []any
 
-func (p destValues) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p scannerScan) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	return rows.Scan(p...)
 }
 
-// ValueAppend returns a [Dest] that appends a single column value to dest per row.
-// For primitive types that don't need a full [Dest] implementation.
-func ValueAppend[T any](s *[]T) Dest {
-	return (*destValueAppend[T])(s)
+// AppendValue returns a [Scanner] that appends a single column value to dest per row.
+// For primitive types that don't need a full [Scanner] implementation.
+func AppendValue[T any](s *[]T) Scanner {
+	return (*scannerAppendValue[T])(s)
 }
 
-type destValueAppend[T any] []T
+type scannerAppendValue[T any] []T
 
-func (p *destValueAppend[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p *scannerAppendValue[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var v T
 	if err := rows.Scan(&v); err != nil {
 		return err
@@ -518,15 +518,15 @@ func (p *destValueAppend[T]) ScanFrom(columns []string, rows *sql.Rows, buf []an
 	return nil
 }
 
-// ValueSet returns a [Dest] that inserts a single column value into dest per row.
-// For primitive types that don't need a full [Dest] implementation.
-func ValueSet[T comparable](s map[T]struct{}) Dest {
-	return (destSet[T])(s)
+// SetValue returns a [Scanner] that inserts a single column value into dest per row.
+// For primitive types that don't need a full [Scanner] implementation.
+func SetValue[T comparable](s map[T]struct{}) Scanner {
+	return (scannerSetValue[T])(s)
 }
 
-type destSet[T comparable] map[T]struct{}
+type scannerSetValue[T comparable] map[T]struct{}
 
-func (p destSet[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p scannerSetValue[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var v T
 	if err := rows.Scan(&v); err != nil {
 		return err
@@ -535,15 +535,15 @@ func (p destSet[T]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error 
 	return nil
 }
 
-// ValueMap returns a [Dest] that reads two columns into dest as key-value pairs per row.
-// For primitive types that don't need a full [Dest] implementation.
-func ValueMap[K comparable, V any](m map[K]V) Dest {
-	return destMap[K, V](m)
+// MapValues returns a [Scanner] that reads two columns into dest as key-value pairs per row.
+// For primitive types that don't need a full [Scanner] implementation.
+func MapValues[K comparable, V any](m map[K]V) Scanner {
+	return scannerMapValues[K, V](m)
 }
 
-type destMap[K comparable, V any] map[K]V
+type scannerMapValues[K comparable, V any] map[K]V
 
-func (p destMap[K, V]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
+func (p scannerMapValues[K, V]) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
 	var k K
 	var v V
 	if err := rows.Scan(&k, &v); err != nil {

@@ -42,8 +42,8 @@ func (m Membership) Values() []sql.NamedArg {
 }
 
 func (m *Membership) ScanFrom(columns []string, rows *sql.Rows, buf []any) error {
-	for _, c := range columns {
-		switch c {
+	for _, col := range columns {
+		switch col {
 		case "user_id":
 			buf = append(buf, &m.UserID)
 		case "team_id":
@@ -51,7 +51,7 @@ func (m *Membership) ScanFrom(columns []string, rows *sql.Rows, buf []any) error
 		case "role":
 			buf = append(buf, &m.Role)
 		default:
-			return fmt.Errorf("unknown column name %q", c)
+			return fmt.Errorf("unknown column name %q", col)
 		}
 	}
 	return rows.Scan(buf...)
