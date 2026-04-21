@@ -13,6 +13,7 @@ func TestMain(m *testing.M) {
 }
 
 func TestScripts(t *testing.T) {
+	t.Parallel()
 	testscript.Run(t, testscript.Params{
 		Dir:                 "testdata",
 		RequireExplicitExec: true,
@@ -20,6 +21,7 @@ func TestScripts(t *testing.T) {
 }
 
 func TestToSnake(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in, want string
 	}{

@@ -3,6 +3,7 @@ package sqlb_test
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"testing"
@@ -185,18 +186,20 @@ func ExampleQueryRow() {
 }
 
 func TestQueryRowNoRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
 
 	var task Task
 	err := sqlb.QueryRow(ctx, db, &task, "SELECT * FROM tasks WHERE id = ?", 999)
-	if err != sql.ErrNoRows {
+	if !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("got %v, want sql.ErrNoRows", err)
 	}
 }
 
 func TestQueryRowQueryError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -233,6 +236,7 @@ func ExampleQueryRows() {
 }
 
 func TestQueryRowsQueryError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -245,6 +249,7 @@ func TestQueryRowsQueryError(t *testing.T) {
 }
 
 func TestQueryRowsScanError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -280,6 +285,7 @@ func ExampleRows() {
 }
 
 func TestRowsQueryError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -294,6 +300,7 @@ func TestRowsQueryError(t *testing.T) {
 }
 
 func TestRowsError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -450,6 +457,7 @@ func ExampleJSON() {
 }
 
 func TestJSONScanNull(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -467,6 +475,7 @@ func TestJSONScanNull(t *testing.T) {
 }
 
 func TestJSONScanString(t *testing.T) {
+	t.Parallel()
 	// Test that JSON.Scan handles string type (some drivers return string instead of []byte)
 	var data sqlb.JSON[map[string]string]
 	err := data.Scan(`{"key":"value"}`)
@@ -479,6 +488,7 @@ func TestJSONScanString(t *testing.T) {
 }
 
 func TestJSONScanInvalidType(t *testing.T) {
+	t.Parallel()
 	var data sqlb.JSON[map[string]any]
 	err := data.Scan(123)
 	if err == nil {
@@ -502,6 +512,7 @@ func ExampleWithLogFunc() {
 }
 
 func TestLog(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -552,6 +563,7 @@ func TestLog(t *testing.T) {
 }
 
 func TestLogQueryRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -571,6 +583,7 @@ func TestLogQueryRows(t *testing.T) {
 }
 
 func TestLogRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -610,6 +623,7 @@ func ExampleStmtCache() {
 }
 
 func TestStmtCache(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -644,7 +658,7 @@ func TestStmtCache(t *testing.T) {
 		t.Errorf("got %d prepareCalls, want 2", prepareCalls)
 	}
 
-	tx, err := db.Begin()
+	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -664,6 +678,7 @@ func TestStmtCache(t *testing.T) {
 }
 
 func TestStmtCachePrepareError(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	db := newDB(ctx)
 	defer db.Close()
@@ -689,8 +704,8 @@ func BenchmarkStmtCache(b *testing.B) {
 		v    T
 	}
 	dbs := []bcase[func(tb testing.TB) sqlb.ExecDB]{
-		{"raw", func(tb testing.TB) sqlb.ExecDB { return newDB(ctx) }},
-		{"cached", func(tb testing.TB) sqlb.ExecDB { return sqlb.NewStmtCache(newDB(b.Context())) }},
+		{"raw", func(tb testing.TB) sqlb.ExecDB { tb.Helper(); return newDB(ctx) }},
+		{"cached", func(tb testing.TB) sqlb.ExecDB { tb.Helper(); return sqlb.NewStmtCache(newDB(b.Context())) }},
 	}
 	queries := []bcase[sqlb.Query]{
 		{"simple", sqlb.NewQuery(`select 1 where ? and ? and ? not in (?)`, 1, 1, 0, 4)},

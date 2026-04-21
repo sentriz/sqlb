@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -80,10 +81,10 @@ func parseArgs(args []string) ([]*typeConfig, string, error) {
 		}
 	}
 	if len(types) == 0 {
-		return nil, "", fmt.Errorf("no types specified")
+		return nil, "", errors.New("no types specified")
 	}
 	if dest == "" {
-		return nil, "", fmt.Errorf("missing -- output.gen.go")
+		return nil, "", errors.New("missing -- output.gen.go")
 	}
 	return types, dest, nil
 }

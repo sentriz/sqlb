@@ -303,6 +303,9 @@ func QueryRow(ctx context.Context, db QueryDB, dest Scanner, query string, args 
 	defer rows.Close()
 
 	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return err
+		}
 		return sql.ErrNoRows
 	}
 
@@ -628,7 +631,7 @@ func NewStmtCache(db PrepareDB) *StmtCache {
 }
 
 func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	stmt, err := sc.getStmt(ctx, query)
+	stmt, err := sc.getStmt(ctx, query) //nolint:sqlclosecheck // stmt is owned by cache, closed in Close
 	if err != nil {
 		return nil, err
 	}
@@ -636,11 +639,28 @@ func (sc *StmtCache) QueryContext(ctx context.Context, query string, args ...any
 }
 
 func (sc *StmtCache) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
-	stmt, err := sc.getStmt(ctx, query)
+	stmt, err := sc.getStmt(ctx, query) //nolint:sqlclosecheck // stmt is owned by cache, closed in Close
 	if err != nil {
 		return nil, err
 	}
 	return stmt.ExecContext(ctx, args...)
+}
+
+func (sc *StmtCache) Close() error {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+
+	var errs []error
+	for _, stmt := range sc.cache {
+		if err := stmt.Close(); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("closing statements: %w", err)
+	}
+	return nil
 }
 
 func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, error) {
@@ -660,28 +680,11 @@ func (sc *StmtCache) getStmt(ctx context.Context, query string) (*sql.Stmt, erro
 		return stmt, nil
 	}
 
-	stmt, err := sc.db.PrepareContext(ctx, query)
+	stmt, err := sc.db.PrepareContext(ctx, query) //nolint:sqlclosecheck // stmt is stored in cache, closed in Close
 	if err != nil {
 		return nil, err
 	}
 
 	sc.cache[query] = stmt
 	return stmt, nil
-}
-
-func (sc *StmtCache) Close() error {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-
-	var errs []error
-	for _, stmt := range sc.cache {
-		if err := stmt.Close(); err != nil {
-			errs = append(errs, err)
-			continue
-		}
-	}
-	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("closing statements: %v", err)
-	}
-	return nil
 }
